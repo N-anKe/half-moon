@@ -1,0 +1,56 @@
+import { useMemo, useState } from "react";
+import { BottomNav } from "./components/BottomNav";
+import { HomeTab } from "./components/HomeTab";
+import { InsightsTab } from "./components/InsightsTab";
+import { ProfileTab } from "./components/ProfileTab";
+import type { PeriodRecordInput, PeriodServiceSnapshot } from "./models/cycle";
+import { createPeriodService, LocalPeriodRepository } from "./services/cycle";
+
+export type TabKey = "home" | "insights" | "profile";
+
+export default function App() {
+  const service = useMemo(() => createPeriodService(new LocalPeriodRepository()), []);
+  const [activeTab, setActiveTab] = useState<TabKey>("home");
+  const [snapshot, setSnapshot] = useState<PeriodServiceSnapshot>(() => service.getSnapshot());
+
+  function handleSaveRecord(input: PeriodRecordInput) {
+    const existingRecord = service.getRecords().find((record) => record.startDate === input.startDate);
+
+    setSnapshot(existingRecord ? service.updateRecord(existingRecord.id, input) : service.addRecord(input));
+  }
+
+  return (
+    <main className="flex min-h-dvh justify-center bg-gray-100 font-sans text-[#1D1D1F] selection:bg-rose-200 sm:p-6 md:p-8">
+      <div className="relative flex min-h-dvh w-full max-w-[430px] flex-col overflow-hidden bg-[#F5F5F7] shadow-[0_20px_60px_rgba(0,0,0,0.1)] sm:min-h-[860px] sm:rounded-[48px] sm:border sm:border-gray-200/50">
+        <div className="flex-1 overflow-y-auto pb-32 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {activeTab === "home" ? (
+          <HomeTab
+            records={snapshot.records}
+            settings={snapshot.settings}
+            summary={snapshot.summary}
+            onSaveRecord={handleSaveRecord}
+          />
+        ) : null}
+        {activeTab === "insights" ? (
+          <InsightsTab
+            records={snapshot.records}
+            settings={snapshot.settings}
+            summary={snapshot.summary}
+          />
+        ) : null}
+        {activeTab === "profile" ? (
+          <ProfileTab
+            records={snapshot.records}
+            settings={snapshot.settings}
+            onClearCache={() => {
+              localStorage.clear();
+              setSnapshot(service.getSnapshot());
+            }}
+          />
+        ) : null}
+        </div>
+        <BottomNav activeTab={activeTab} onChange={setActiveTab} />
+      </div>
+    </main>
+  );
+}
