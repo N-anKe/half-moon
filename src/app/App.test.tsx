@@ -40,6 +40,40 @@ describe("Half Moon app", () => {
     expect(screen.getByText("身体数据档案")).toBeInTheDocument();
   });
 
+  test("asks for confirmation before clearing local cache and shows success feedback", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem(
+      "half-moon.day-status-logs",
+      JSON.stringify([
+        {
+          id: "log-1",
+          date: "2026-05-10",
+          periodQuestion: "start",
+          periodAnswer: "no",
+          time: "09:00",
+          createdAt: "2026-05-10T00:00:00.000Z",
+          updatedAt: "2026-05-10T00:00:00.000Z"
+        }
+      ])
+    );
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "我的" }));
+
+    expect(screen.queryByText(/条记录/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "清除缓存" }));
+
+    expect(screen.getByRole("dialog", { name: "确认清除缓存" })).toBeInTheDocument();
+    expect(localStorage.getItem("half-moon.day-status-logs")).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "确认清除" }));
+
+    expect(localStorage.getItem("half-moon.day-status-logs")).toBeNull();
+    expect(screen.getByText("删除成功")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "确认清除缓存" })).not.toBeInTheDocument();
+  });
+
   test("automatically saves a day status log when a selected date status changes", async () => {
     const user = userEvent.setup();
     render(<App />);

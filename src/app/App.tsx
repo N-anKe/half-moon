@@ -55,7 +55,6 @@ export default function App() {
         ) : null}
         {activeTab === "profile" ? (
           <ProfileTab
-            records={snapshot.records}
             settings={snapshot.settings}
             onClearCache={() => {
               localStorage.clear();
