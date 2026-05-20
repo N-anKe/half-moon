@@ -45,6 +45,7 @@ export interface DayStatusLog {
   symptoms?: string[];
   mood?: string;
   notes?: string;
+  details?: DayStatusDetails;
   createdAt: string;
   updatedAt: string;
 }
@@ -58,6 +59,26 @@ export interface DayStatusLogInput {
   symptoms?: string[];
   mood?: string;
   notes?: string;
+  details?: DayStatusDetails;
+}
+
+export interface DayStatusDetails {
+  color?: string;
+  intimacy?: {
+    status: string;
+    protected?: boolean;
+    notes?: string;
+  };
+  symptoms?: string[];
+  discharge?: {
+    amount?: string;
+    texture?: string;
+    color?: string;
+  };
+  temperature?: number;
+  weight?: number;
+  diary?: string;
+  habits?: string[];
 }
 
 export interface UserCycleSettings {

@@ -1,24 +1,34 @@
 import { useMemo, useState, type ReactNode } from "react";
 import {
   Activity,
+  BatteryLow,
   BookOpenText,
-  Camera,
+  Check,
   ChevronLeft,
   ChevronRight,
+  CircleAlert,
   CirclePlus,
+  Droplet,
   Droplets,
+  Frown,
   Heart,
+  HeartPulse,
+  type LucideIcon,
+  Meh,
   Moon,
   Palette,
   Scale,
   Smile,
   Sparkles,
   Thermometer,
-  ToggleLeft
+  ToggleLeft,
+  X,
+  Zap
 } from "lucide-react";
 import type {
   CyclePeriod,
   CycleSummary,
+  DayStatusDetails,
   DayStatusLog,
   DayStatusLogInput,
   PeriodAnswer,
@@ -49,6 +59,16 @@ interface DayLogDraft {
   mood: string;
 }
 
+type DetailStatusKey =
+  | "color"
+  | "intimacy"
+  | "symptoms"
+  | "discharge"
+  | "temperature"
+  | "weight"
+  | "diary"
+  | "habits";
+
 interface CalendarDay {
   date: Date;
   day: number;
@@ -62,16 +82,24 @@ const FLOW_OPTIONS = ["无", "少量", "正常", "偏多"];
 const PAIN_OPTIONS = ["无痛", "轻微", "明显", "严重"];
 const MOOD_OPTIONS = ["开心", "平静", "疲惫", "烦躁"];
 const PERIOD_OPTIONS = ["是", "否"];
-const PASSIVE_STATUS_ROWS = [
-  { title: "颜色", icon: <Palette className="h-4 w-4" /> },
-  { title: "爱爱", icon: <Heart className="h-4 w-4" /> },
-  { title: "症状", icon: <Camera className="h-4 w-4" /> },
-  { title: "白带", icon: <Droplets className="h-4 w-4" /> },
-  { title: "体温", icon: <Thermometer className="h-4 w-4" /> },
-  { title: "体重", icon: <Scale className="h-4 w-4" /> },
-  { title: "日记", icon: <BookOpenText className="h-4 w-4" /> },
-  { title: "好习惯", icon: <Activity className="h-4 w-4" /> }
+const DETAIL_STATUS_ROWS: Array<{ key: DetailStatusKey; title: string; icon: ReactNode }> = [
+  { key: "color", title: "颜色", icon: <Palette className="h-4 w-4" /> },
+  { key: "intimacy", title: "爱爱", icon: <Heart className="h-4 w-4" /> },
+  { key: "symptoms", title: "症状", icon: <HeartPulse className="h-4 w-4" /> },
+  { key: "discharge", title: "白带", icon: <Droplets className="h-4 w-4" /> },
+  { key: "temperature", title: "体温", icon: <Thermometer className="h-4 w-4" /> },
+  { key: "weight", title: "体重", icon: <Scale className="h-4 w-4" /> },
+  { key: "diary", title: "日记", icon: <BookOpenText className="h-4 w-4" /> },
+  { key: "habits", title: "好习惯", icon: <Activity className="h-4 w-4" /> }
 ];
+const DETAIL_STATUS_TITLES = new Map(DETAIL_STATUS_ROWS.map((row) => [row.key, row.title]));
+const COLOR_OPTIONS = ["鲜红", "暗红", "粉红", "褐色", "黑褐"];
+const INTIMACY_OPTIONS = ["有保护", "无保护", "仅亲密"];
+const SYMPTOM_OPTIONS = ["腹痛", "腰酸", "乳房胀痛", "头痛", "疲惫"];
+const DISCHARGE_AMOUNT_OPTIONS = ["少量", "适中", "偏多"];
+const DISCHARGE_TEXTURE_OPTIONS = ["水样", "乳状", "粘稠"];
+const DISCHARGE_COLOR_OPTIONS = ["透明", "白色", "淡黄"];
+const HABIT_OPTIONS = ["喝水", "运动", "早睡", "护肤", "补铁"];
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear();
@@ -206,6 +234,414 @@ function currentTimeInput(): string {
   return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 }
 
+function hasStructuredDetails(log: DayStatusLog | undefined): boolean {
+  if (!log?.details) return false;
+
+  return Object.values(log.details).some((value) => {
+    if (Array.isArray(value)) return value.length > 0;
+    if (value && typeof value === "object") return Object.values(value).some(Boolean);
+    return Boolean(value);
+  });
+}
+
+function iconForFlow(flowLevel: DayStatusLog["flowLevel"]) {
+  if (flowLevel === "light") {
+    return { Icon: Droplet, label: "流量 少量", color: "#F5A3B7", strokeWidth: 2 };
+  }
+  if (flowLevel === "medium") {
+    return { Icon: Droplets, label: "流量 正常", color: "#E94D8A", strokeWidth: 2 };
+  }
+  if (flowLevel === "heavy") {
+    return { Icon: Droplets, label: "流量 偏多", color: "#C92A68", strokeWidth: 2.6 };
+  }
+
+  return null;
+}
+
+function iconForPain(log: DayStatusLog) {
+  const pain = log.symptoms?.find((symptom) => PAIN_OPTIONS.includes(symptom));
+  if (pain === "轻微") {
+    return { Icon: HeartPulse, label: "痛经 轻微", color: "#F0A35E", strokeWidth: 2 };
+  }
+  if (pain === "明显") {
+    return { Icon: Zap, label: "痛经 明显", color: "#E67E22", strokeWidth: 2.2 };
+  }
+  if (pain === "严重") {
+    return { Icon: CircleAlert, label: "痛经 严重", color: "#D94848", strokeWidth: 2.2 };
+  }
+  if (log.details?.symptoms?.length) {
+    return { Icon: HeartPulse, label: "症状 已记录", color: "#B86D92", strokeWidth: 2 };
+  }
+
+  return null;
+}
+
+function iconForMood(mood: string | undefined) {
+  if (mood === "开心") return { Icon: Smile, label: "心情 开心", color: "#F2B84B", strokeWidth: 2 };
+  if (mood === "平静") return { Icon: Meh, label: "心情 平静", color: "#7BA7A0", strokeWidth: 2 };
+  if (mood === "疲惫") return { Icon: BatteryLow, label: "心情 疲惫", color: "#8B93A7", strokeWidth: 2 };
+  if (mood === "烦躁") return { Icon: Frown, label: "心情 烦躁", color: "#B86D76", strokeWidth: 2 };
+
+  return null;
+}
+
+function CalendarRecordIcons({ log }: { log: DayStatusLog }) {
+  const icons = [iconForFlow(log.flowLevel), iconForPain(log), iconForMood(log.mood)].filter(Boolean) as Array<{
+    Icon: LucideIcon;
+    label: string;
+    color: string;
+    strokeWidth: number;
+  }>;
+
+  if (!icons.length && hasStructuredDetails(log)) {
+    icons.push({ Icon: Check, label: "详情 已记录", color: "#8B93A7", strokeWidth: 2.2 });
+  }
+
+  return (
+    <span className="-mt-1 flex h-3 items-center justify-center gap-0.5" aria-label="已记录">
+      {icons.slice(0, 3).map(({ Icon, label, color, strokeWidth }) => (
+        <span key={label} aria-label={label} role="img">
+          <Icon
+            aria-hidden="true"
+            className="h-2.5 w-2.5"
+            color={color}
+            strokeWidth={strokeWidth}
+          />
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function toggleListValue(values: string[] | undefined, option: string): string[] {
+  const current = values ?? [];
+  if (current.includes(option)) return current.filter((value) => value !== option);
+
+  return [...current, option];
+}
+
+function defaultDetailsForKey(key: DetailStatusKey, details: DayStatusDetails | undefined): DayStatusDetails {
+  if (key === "color") return { color: details?.color ?? "鲜红" };
+  if (key === "intimacy") {
+    return {
+      intimacy: details?.intimacy ?? {
+        status: "有保护",
+        protected: true,
+        notes: ""
+      }
+    };
+  }
+  if (key === "symptoms") return { symptoms: details?.symptoms ?? [] };
+  if (key === "discharge") {
+    return {
+      discharge: details?.discharge ?? {
+        amount: "适中",
+        texture: "乳状",
+        color: "透明"
+      }
+    };
+  }
+  if (key === "temperature") return { temperature: details?.temperature ?? 36.6 };
+  if (key === "weight") return { weight: details?.weight ?? 50 };
+  if (key === "diary") return { diary: details?.diary ?? "" };
+
+  return { habits: details?.habits ?? [] };
+}
+
+function patchForKey(key: DetailStatusKey, draft: DayStatusDetails): DayStatusDetails {
+  if (key === "color") return { color: draft.color };
+  if (key === "intimacy") return { intimacy: draft.intimacy };
+  if (key === "symptoms") return { symptoms: draft.symptoms ?? [] };
+  if (key === "discharge") return { discharge: draft.discharge };
+  if (key === "temperature") return { temperature: draft.temperature };
+  if (key === "weight") return { weight: draft.weight };
+  if (key === "diary") return { diary: draft.diary?.trim() ?? "" };
+
+  return { habits: draft.habits ?? [] };
+}
+
+function ChoiceGroup({
+  label,
+  options,
+  selected,
+  onSelect
+}: {
+  label: string;
+  options: string[];
+  selected: string | undefined;
+  onSelect: (option: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-[13px] font-semibold text-gray-500">{label}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => {
+          const active = selected === option;
+
+          return (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onSelect(option)}
+              className={cn(
+                "min-h-9 rounded-full px-3 text-[13px] font-semibold transition",
+                active
+                  ? "bg-[#E94D8A] text-white shadow-[0_6px_14px_rgba(233,77,138,0.2)]"
+                  : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+              )}
+            >
+              {option}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MultiChoiceGroup({
+  label,
+  options,
+  selected,
+  onToggle
+}: {
+  label: string;
+  options: string[];
+  selected: string[] | undefined;
+  onToggle: (option: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-[13px] font-semibold text-gray-500">{label}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((option) => {
+          const active = selected?.includes(option) ?? false;
+
+          return (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onToggle(option)}
+              className={cn(
+                "min-h-9 rounded-full px-3 text-[13px] font-semibold transition",
+                active
+                  ? "bg-[#1D1D1F] text-white shadow-[0_6px_14px_rgba(29,29,31,0.14)]"
+                  : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+              )}
+            >
+              {option}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DayStatusSheet({
+  statusKey,
+  dateTitle,
+  existingDetails,
+  onClose,
+  onConfirm
+}: {
+  statusKey: DetailStatusKey;
+  dateTitle: string;
+  existingDetails: DayStatusDetails | undefined;
+  onClose: () => void;
+  onConfirm: (details: DayStatusDetails) => void;
+}) {
+  const [draft, setDraft] = useState<DayStatusDetails>(() =>
+    defaultDetailsForKey(statusKey, existingDetails)
+  );
+  const title = DETAIL_STATUS_TITLES.get(statusKey) ?? "记录";
+  const dialogTitle = `记录${title}`;
+
+  function updateDraft(nextDraft: DayStatusDetails) {
+    setDraft((current) => ({ ...current, ...nextDraft }));
+  }
+
+  return (
+    <section
+      role="dialog"
+      aria-modal="true"
+      aria-label={dialogTitle}
+      className="fixed inset-x-0 bottom-0 z-50 mx-auto h-[75dvh] w-full max-w-[430px] overflow-hidden rounded-t-[34px] bg-white shadow-[0_-18px_50px_rgba(31,41,55,0.2)] sm:bottom-8"
+    >
+      <div className="flex h-full flex-col">
+        <header className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+          <button
+            type="button"
+            aria-label="关闭记录弹窗"
+            onClick={onClose}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100 text-gray-500 transition hover:bg-gray-200"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <div className="text-center">
+            <h2 className="text-[19px] font-semibold tracking-[-0.01em]">{dialogTitle}</h2>
+            <p className="mt-1 text-[12px] text-gray-400">{dateTitle}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="保存记录详情"
+            onClick={() => onConfirm(patchForKey(statusKey, draft))}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1D1D1F] text-white shadow-[0_10px_22px_rgba(29,29,31,0.18)] transition active:scale-95"
+          >
+            <Check className="h-5 w-5" />
+          </button>
+        </header>
+
+        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+          {statusKey === "color" ? (
+            <ChoiceGroup
+              label="经血颜色"
+              options={COLOR_OPTIONS}
+              selected={draft.color}
+              onSelect={(color) => updateDraft({ color })}
+            />
+          ) : null}
+
+          {statusKey === "intimacy" ? (
+            <>
+              <ChoiceGroup
+                label="状态"
+                options={INTIMACY_OPTIONS}
+                selected={draft.intimacy?.status}
+                onSelect={(status) =>
+                  updateDraft({
+                    intimacy: {
+                      ...draft.intimacy,
+                      status,
+                      protected: status === "有保护" ? true : status === "无保护" ? false : undefined
+                    }
+                  })
+                }
+              />
+              <label className="block space-y-2 text-[13px] font-semibold text-gray-500">
+                备注
+                <textarea
+                  value={draft.intimacy?.notes ?? ""}
+                  onChange={(event) =>
+                    updateDraft({
+                      intimacy: {
+                        ...draft.intimacy,
+                        status: draft.intimacy?.status ?? "有保护",
+                        notes: event.target.value
+                      }
+                    })
+                  }
+                  className="min-h-24 w-full resize-none rounded-[22px] border border-gray-100 bg-gray-50 px-4 py-3 text-[15px] font-normal text-[#1D1D1F] outline-none focus:ring-2 focus:ring-[#E94D8A]/20"
+                  placeholder="可记录感受或提醒"
+                />
+              </label>
+            </>
+          ) : null}
+
+          {statusKey === "symptoms" ? (
+            <MultiChoiceGroup
+              label="症状"
+              options={SYMPTOM_OPTIONS}
+              selected={draft.symptoms}
+              onToggle={(symptom) => updateDraft({ symptoms: toggleListValue(draft.symptoms, symptom) })}
+            />
+          ) : null}
+
+          {statusKey === "discharge" ? (
+            <>
+              <ChoiceGroup
+                label="白带量"
+                options={DISCHARGE_AMOUNT_OPTIONS}
+                selected={draft.discharge?.amount}
+                onSelect={(amount) =>
+                  updateDraft({ discharge: { ...draft.discharge, amount } })
+                }
+              />
+              <ChoiceGroup
+                label="质地"
+                options={DISCHARGE_TEXTURE_OPTIONS}
+                selected={draft.discharge?.texture}
+                onSelect={(texture) =>
+                  updateDraft({ discharge: { ...draft.discharge, texture } })
+                }
+              />
+              <ChoiceGroup
+                label="颜色"
+                options={DISCHARGE_COLOR_OPTIONS}
+                selected={draft.discharge?.color}
+                onSelect={(color) => updateDraft({ discharge: { ...draft.discharge, color } })}
+              />
+            </>
+          ) : null}
+
+          {statusKey === "temperature" ? (
+            <label className="block space-y-2 text-[13px] font-semibold text-gray-500">
+              体温数值
+              <input
+                aria-label="体温数值"
+                type="number"
+                inputMode="decimal"
+                step="0.1"
+                value={draft.temperature ?? ""}
+                onChange={(event) =>
+                  updateDraft({
+                    temperature: event.target.value ? Number(event.target.value) : undefined
+                  })
+                }
+                className="h-14 w-full rounded-[22px] border border-gray-100 bg-gray-50 px-4 text-[22px] font-semibold text-[#1D1D1F] outline-none focus:ring-2 focus:ring-[#E94D8A]/20"
+              />
+              <span className="block text-[12px] font-medium text-gray-400">单位：°C</span>
+            </label>
+          ) : null}
+
+          {statusKey === "weight" ? (
+            <label className="block space-y-2 text-[13px] font-semibold text-gray-500">
+              体重数值
+              <input
+                aria-label="体重数值"
+                type="number"
+                inputMode="decimal"
+                step="0.1"
+                value={draft.weight ?? ""}
+                onChange={(event) =>
+                  updateDraft({
+                    weight: event.target.value ? Number(event.target.value) : undefined
+                  })
+                }
+                className="h-14 w-full rounded-[22px] border border-gray-100 bg-gray-50 px-4 text-[22px] font-semibold text-[#1D1D1F] outline-none focus:ring-2 focus:ring-[#E94D8A]/20"
+              />
+              <span className="block text-[12px] font-medium text-gray-400">单位：kg</span>
+            </label>
+          ) : null}
+
+          {statusKey === "diary" ? (
+            <label className="block space-y-2 text-[13px] font-semibold text-gray-500">
+              今天想记录什么
+              <textarea
+                value={draft.diary ?? ""}
+                onChange={(event) => updateDraft({ diary: event.target.value })}
+                className="min-h-40 w-full resize-none rounded-[24px] border border-gray-100 bg-gray-50 px-4 py-3 text-[15px] font-normal leading-7 text-[#1D1D1F] outline-none focus:ring-2 focus:ring-[#E94D8A]/20"
+                placeholder="身体感受、睡眠、情绪..."
+              />
+            </label>
+          ) : null}
+
+          {statusKey === "habits" ? (
+            <MultiChoiceGroup
+              label="好习惯"
+              options={HABIT_OPTIONS}
+              selected={draft.habits}
+              onToggle={(habit) => updateDraft({ habits: toggleListValue(draft.habits, habit) })}
+            />
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function StatusRow({
   title,
   icon,
@@ -253,7 +689,15 @@ function StatusRow({
   );
 }
 
-function PassiveStatusRow({ title, icon }: { title: string; icon: ReactNode }) {
+function PassiveStatusRow({
+  title,
+  icon,
+  onAdd
+}: {
+  title: string;
+  icon: ReactNode;
+  onAdd: () => void;
+}) {
   return (
     <div className="flex min-h-12 items-center justify-between border-b border-gray-100 py-2.5 last:border-b-0">
       <div className="flex items-center gap-2 text-[#1D1D1F]">
@@ -264,6 +708,7 @@ function PassiveStatusRow({ title, icon }: { title: string; icon: ReactNode }) {
       </div>
       <button
         type="button"
+        onClick={onAdd}
         className="flex h-8 w-8 items-center justify-center rounded-full text-[#D66D92] transition hover:bg-[#FDECEF]"
         aria-label={`添加${title}`}
       >
@@ -283,6 +728,7 @@ export function HomeTab({
   onSaveDayStatus
 }: HomeTabProps) {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [activeDetailKey, setActiveDetailKey] = useState<DetailStatusKey | null>(null);
   const [boundaryTime, setBoundaryTime] = useState(currentTimeInput);
   const [draft, setDraft] = useState<DayLogDraft>({
     flow: "无",
@@ -348,6 +794,35 @@ export function HomeTab({
     onAnswerPeriodPrompt(dateKey, prompt.question, answer, time);
   }
 
+  function openDetailSheet(key: DetailStatusKey) {
+    if (!selectedDate) {
+      openDate(today);
+    }
+    setActiveDetailKey(key);
+  }
+
+  function saveDetailDraft(details: DayStatusDetails) {
+    const targetDate = selectedDate ?? today;
+    const dateKey = formatDateInput(targetDate);
+    const existingLog = logsByDate.get(dateKey);
+    const prompt = getPeriodPromptForDate(dateKey);
+    const time = existingLog?.time || prompt.time || boundaryTime || currentTimeInput();
+    const input: DayStatusLogInput = {
+      date: dateKey,
+      periodQuestion: prompt.question,
+      periodAnswer: prompt.answer ?? existingLog?.periodAnswer ?? "no",
+      time,
+      details
+    };
+
+    if (activeDetailKey === "symptoms") {
+      input.symptoms = details.symptoms ?? [];
+    }
+
+    onSaveDayStatus(input);
+    setActiveDetailKey(null);
+  }
+
   const selectedDateKey = selectedDate ? formatDateInput(selectedDate) : "";
   const selectedLog = selectedDate ? logsByDate.get(selectedDateKey) : undefined;
   const selectedPrompt = selectedDate ? getPeriodPromptForDate(selectedDateKey) : null;
@@ -356,9 +831,20 @@ export function HomeTab({
   const selectedTitle = selectedDate
     ? `${selectedDate.getMonth() + 1}月${selectedDate.getDate()}日 ${formatWeekday(selectedDate)}`
     : "选择日期记录状态";
+  const sheetDate = selectedDate ?? today;
+  const sheetDateKey = formatDateInput(sheetDate);
+  const sheetDateTitle = `${sheetDate.getMonth() + 1}月${sheetDate.getDate()}日 ${formatWeekday(sheetDate)}`;
+  const sheetLog = logsByDate.get(sheetDateKey);
 
   return (
-    <div className="px-6 pb-4 pt-8">
+    <div className="relative min-h-full">
+      <div
+        data-testid="home-content"
+        className={cn(
+          "px-6 pb-4 pt-8 transition duration-300 ease-out",
+          activeDetailKey && "scale-[0.97] blur-[3px]"
+        )}
+      >
       <header className="mb-6">
         <h1 className="text-[34px] font-semibold leading-tight tracking-[-0.01em] text-[#1D1D1F]">
           卵泡期，第{summary.currentDay || 12}天
@@ -444,12 +930,7 @@ export function HomeTab({
                   {calendarDay.day}
                 </span>
                 {dateLog ? (
-                  <span className="-mt-1 flex h-3 gap-0.5 text-[8px]" aria-label="已记录">
-                    {dateLog.flowLevel ? "💧" : null}
-                    {dateLog.symptoms?.length ? "❤️" : null}
-                    {dateLog.mood ? "😊" : null}
-                    {!dateLog.flowLevel && !dateLog.symptoms?.length && !dateLog.mood ? "✓" : null}
-                  </span>
+                  <CalendarRecordIcons log={dateLog} />
                 ) : (
                   <span className="h-3" />
                 )}
@@ -472,7 +953,11 @@ export function HomeTab({
             预测经期
           </span>
           <span className="inline-flex items-center gap-1">
-            <span>💧❤️😊</span>
+            <span className="inline-flex items-center gap-0.5">
+              <Droplets className="h-3 w-3 text-[#E94D8A]" />
+              <HeartPulse className="h-3 w-3 text-[#F0A35E]" />
+              <Smile className="h-3 w-3 text-[#F2B84B]" />
+            </span>
             已记录
           </span>
         </div>
@@ -565,10 +1050,35 @@ export function HomeTab({
           selected={draft.mood}
           onSelect={(mood) => updateDraft({ ...draft, mood })}
         />
-        {PASSIVE_STATUS_ROWS.map((row) => (
-          <PassiveStatusRow key={row.title} title={row.title} icon={row.icon} />
+        {DETAIL_STATUS_ROWS.map((row) => (
+          <PassiveStatusRow
+            key={row.key}
+            title={row.title}
+            icon={row.icon}
+            onAdd={() => openDetailSheet(row.key)}
+          />
         ))}
       </section>
+      </div>
+
+      {activeDetailKey ? (
+        <>
+          <button
+            type="button"
+            aria-label="关闭记录弹窗遮罩"
+            onClick={() => setActiveDetailKey(null)}
+            className="fixed inset-0 z-40 mx-auto w-full max-w-[430px] bg-black/12 backdrop-blur-[1px] sm:bottom-8"
+          />
+          <DayStatusSheet
+            key={`${activeDetailKey}-${sheetDateKey}`}
+            statusKey={activeDetailKey}
+            dateTitle={sheetDateTitle}
+            existingDetails={sheetLog?.details}
+            onClose={() => setActiveDetailKey(null)}
+            onConfirm={saveDetailDraft}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

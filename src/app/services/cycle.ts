@@ -305,6 +305,7 @@ function upsertDayStatusLog(
           ? {
               ...log,
               ...input,
+              details: input.details ? { ...log.details, ...input.details } : log.details,
               updatedAt: now
             }
           : log

@@ -94,6 +94,35 @@ describe("createPeriodService", () => {
     expect(service.getRecords()).toHaveLength(1);
   });
 
+  test("saves structured day status details without losing existing daily status fields", () => {
+    const service = createPeriodService(new LocalPeriodRepository(), fixedToday);
+
+    service.saveDayStatusLog({
+      date: "2026-05-19",
+      periodQuestion: "start",
+      periodAnswer: "no",
+      time: "09:20",
+      mood: "平静"
+    });
+    const result = service.saveDayStatusLog({
+      date: "2026-05-19",
+      periodQuestion: "start",
+      periodAnswer: "no",
+      time: "09:20",
+      details: {
+        temperature: 36.8
+      }
+    });
+
+    expect(result.dayLogs[0]).toMatchObject({
+      date: "2026-05-19",
+      mood: "平静",
+      details: {
+        temperature: 36.8
+      }
+    });
+  });
+
   test("starts with a period-start prompt when there is no cycle period", () => {
     const service = createPeriodService(new LocalPeriodRepository(), fixedToday);
 

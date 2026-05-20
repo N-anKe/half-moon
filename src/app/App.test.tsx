@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test } from "vitest";
 import App from "./App";
@@ -89,6 +89,48 @@ describe("Half Moon app", () => {
     expect(localStorage.getItem("half-moon.day-status-logs")).toContain("2026-05-10");
     expect(localStorage.getItem("half-moon.day-status-logs")).toContain("轻微");
     expect(JSON.parse(localStorage.getItem("half-moon.day-status-logs") ?? "[]")).toHaveLength(1);
+  });
+
+  test("opens a bottom sheet from an add button and only saves details after confirmation", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "添加体温" }));
+
+    const sheet = screen.getByRole("dialog", { name: "记录体温" });
+    expect(sheet).toHaveClass("h-[75dvh]");
+    expect(within(sheet).getByText("5月19日 星期二")).toBeInTheDocument();
+    expect(screen.getByTestId("home-content")).toHaveClass("scale-[0.97]");
+
+    await user.clear(screen.getByLabelText("体温数值"));
+    await user.type(screen.getByLabelText("体温数值"), "36.7");
+    await user.click(screen.getByRole("button", { name: "关闭记录弹窗" }));
+
+    expect(screen.queryByRole("dialog", { name: "记录体温" })).not.toBeInTheDocument();
+    expect(localStorage.getItem("half-moon.day-status-logs")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "添加体温" }));
+    await user.clear(screen.getByLabelText("体温数值"));
+    await user.type(screen.getByLabelText("体温数值"), "36.8");
+    await user.click(screen.getByRole("button", { name: "保存记录详情" }));
+
+    expect(localStorage.getItem("half-moon.day-status-logs")).toContain("\"temperature\":36.8");
+  });
+
+  test("renders calendar record markers with degree-aware lucide icons instead of emoji", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /5月10日/ }));
+    await user.click(screen.getByRole("button", { name: "正常" }));
+    await user.click(screen.getByRole("button", { name: "轻微" }));
+
+    expect(screen.getByLabelText("流量 正常")).toBeInTheDocument();
+    expect(screen.getByLabelText("痛经 轻微")).toBeInTheDocument();
+    expect(screen.getByLabelText("心情 平静")).toBeInTheDocument();
+    expect(screen.queryByText("💧")).not.toBeInTheDocument();
+    expect(screen.queryByText("❤️")).not.toBeInTheDocument();
+    expect(screen.queryByText("😊")).not.toBeInTheDocument();
   });
 
   test("switches calendar months with previous and next controls", async () => {
