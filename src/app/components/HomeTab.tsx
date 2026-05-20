@@ -16,14 +16,31 @@ import {
   Thermometer,
   ToggleLeft
 } from "lucide-react";
-import type { CycleSummary, PeriodRecord, PeriodRecordInput, UserCycleSettings } from "../models/cycle";
+import type {
+  CyclePeriod,
+  CycleSummary,
+  DayStatusLog,
+  DayStatusLogInput,
+  PeriodAnswer,
+  PeriodPrompt,
+  PeriodQuestion,
+  UserCycleSettings
+} from "../models/cycle";
 import { cn } from "./ui/utils";
 
 interface HomeTabProps {
   summary: CycleSummary;
-  records: PeriodRecord[];
+  periods: CyclePeriod[];
+  dayLogs: DayStatusLog[];
   settings: UserCycleSettings;
-  onSaveRecord: (input: PeriodRecordInput) => void;
+  getPeriodPromptForDate: (date: string) => PeriodPrompt;
+  onAnswerPeriodPrompt: (
+    date: string,
+    question: PeriodQuestion,
+    answer: PeriodAnswer,
+    time: string
+  ) => void;
+  onSaveDayStatus: (input: DayStatusLogInput) => void;
 }
 
 interface DayLogDraft {
@@ -108,50 +125,52 @@ function buildMonthCalendar(visibleMonth: Date): CalendarDay[] {
   return days;
 }
 
-function recordMapByDate(records: PeriodRecord[]): Map<string, PeriodRecord> {
-  return new Map(records.map((record) => [record.startDate, record]));
+function dayLogMapByDate(logs: DayStatusLog[]): Map<string, DayStatusLog> {
+  return new Map(logs.map((log) => [log.date, log]));
 }
 
-function hasPeriodFlow(record: PeriodRecord | undefined): boolean {
-  return Boolean(record?.flowLevel);
-}
-
-function flowLabelFromRecord(record: PeriodRecord | undefined, fallback = "无"): string {
-  if (record?.flowLevel === "light") return "少量";
-  if (record?.flowLevel === "medium") return "正常";
-  if (record?.flowLevel === "heavy") return "偏多";
+function flowLabelFromLog(log: DayStatusLog | undefined, fallback = "无"): string {
+  if (log?.flowLevel === "light") return "少量";
+  if (log?.flowLevel === "medium") return "正常";
+  if (log?.flowLevel === "heavy") return "偏多";
 
   return fallback;
 }
 
-function draftFromRecord(record: PeriodRecord | undefined, fallback: DayLogDraft): DayLogDraft {
-  if (!record) return fallback;
+function draftFromLog(log: DayStatusLog | undefined, fallback: DayLogDraft): DayLogDraft {
+  if (!log) return fallback;
 
   return {
-    flow: flowLabelFromRecord(record),
-    pain: record.symptoms?.[0] ?? "无痛",
-    mood: record.mood ?? "平静"
+    flow: flowLabelFromLog(log),
+    pain: log.symptoms?.[0] ?? "无痛",
+    mood: log.mood ?? "平静"
   };
 }
 
-function draftForNewDate(recordsByDate: Map<string, PeriodRecord>, date: Date): DayLogDraft {
-  const previousRecord = recordsByDate.get(formatDateInput(addCalendarDays(date, -1)));
+function draftForNewDate(logsByDate: Map<string, DayStatusLog>, date: Date): DayLogDraft {
+  const previousLog = logsByDate.get(formatDateInput(addCalendarDays(date, -1)));
 
   return {
-    flow: hasPeriodFlow(previousRecord) ? flowLabelFromRecord(previousRecord, "正常") : "无",
+    flow: flowLabelFromLog(previousLog),
     pain: "无痛",
     mood: "平静"
   };
 }
 
-function periodRoleForDate(recordsByDate: Map<string, PeriodRecord>, date: Date): PeriodRangeRole | null {
-  const currentKey = formatDateInput(date);
-  if (!hasPeriodFlow(recordsByDate.get(currentKey))) return null;
+function isDateWithinPeriod(dateKey: string, period: CyclePeriod, openEndDate: string): boolean {
+  const endDate = period.endDate ?? openEndDate;
+  return dateKey >= period.startDate && dateKey <= endDate;
+}
 
+function periodRoleForDate(periods: CyclePeriod[], date: Date, openEndDate: string): PeriodRangeRole | null {
+  const currentKey = formatDateInput(date);
   const previousKey = formatDateInput(addCalendarDays(date, -1));
   const nextKey = formatDateInput(addCalendarDays(date, 1));
-  const hasPrevious = hasPeriodFlow(recordsByDate.get(previousKey));
-  const hasNext = hasPeriodFlow(recordsByDate.get(nextKey));
+  const currentPeriod = periods.find((period) => isDateWithinPeriod(currentKey, period, openEndDate));
+  if (!currentPeriod) return null;
+
+  const hasPrevious = periods.some((period) => isDateWithinPeriod(previousKey, period, openEndDate));
+  const hasNext = periods.some((period) => isDateWithinPeriod(nextKey, period, openEndDate));
 
   if (hasPrevious && hasNext) return "middle";
   if (hasPrevious) return "end";
@@ -173,13 +192,18 @@ function isPredictedPeriodDate(date: Date, summary: CycleSummary, settings: User
   return false;
 }
 
-function periodLabel(role: PeriodRangeRole | null, record: PeriodRecord | undefined): string {
-  if (!role) return record ? "非经期" : "";
+function periodLabel(role: PeriodRangeRole | null, log: DayStatusLog | undefined): string {
+  if (!role) return log ? "非经期" : "";
   if (role === "single") return "经期开始 经期结束";
   if (role === "start") return "经期开始";
   if (role === "middle") return "经期中";
 
   return "经期结束";
+}
+
+function currentTimeInput(): string {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 }
 
 function StatusRow({
@@ -249,8 +273,17 @@ function PassiveStatusRow({ title, icon }: { title: string; icon: ReactNode }) {
   );
 }
 
-export function HomeTab({ summary, records, settings, onSaveRecord }: HomeTabProps) {
+export function HomeTab({
+  summary,
+  periods,
+  dayLogs,
+  settings,
+  getPeriodPromptForDate,
+  onAnswerPeriodPrompt,
+  onSaveDayStatus
+}: HomeTabProps) {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [boundaryTime, setBoundaryTime] = useState(currentTimeInput);
   const [draft, setDraft] = useState<DayLogDraft>({
     flow: "无",
     pain: "无痛",
@@ -259,18 +292,23 @@ export function HomeTab({ summary, records, settings, onSaveRecord }: HomeTabPro
   const today = new Date(2026, 4, 19);
   const [visibleMonth, setVisibleMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const calendarDays = useMemo(() => buildMonthCalendar(visibleMonth), [visibleMonth]);
-  const recordsByDate = useMemo(() => recordMapByDate(records), [records]);
+  const logsByDate = useMemo(() => dayLogMapByDate(dayLogs), [dayLogs]);
 
   function openDate(date: Date) {
-    const existingRecord = recordsByDate.get(formatDateInput(date));
+    const dateKey = formatDateInput(date);
+    const existingLog = logsByDate.get(dateKey);
+    const prompt = getPeriodPromptForDate(dateKey);
     if (date.getMonth() !== visibleMonth.getMonth() || date.getFullYear() !== visibleMonth.getFullYear()) {
       setVisibleMonth(new Date(date.getFullYear(), date.getMonth(), 1));
     }
     setSelectedDate(date);
-    setDraft(draftFromRecord(existingRecord, draftForNewDate(recordsByDate, date)));
+    setBoundaryTime(prompt.time || currentTimeInput());
+    setDraft(draftFromLog(existingLog, draftForNewDate(logsByDate, date)));
   }
 
-  function buildRecordInput(date: Date, nextDraft: DayLogDraft): PeriodRecordInput {
+  function buildDayLogInput(date: Date, nextDraft: DayLogDraft): DayStatusLogInput {
+    const dateKey = formatDateInput(date);
+    const prompt = getPeriodPromptForDate(dateKey);
     const flowLevel =
       nextDraft.flow === "偏多"
         ? "heavy"
@@ -281,7 +319,10 @@ export function HomeTab({ summary, records, settings, onSaveRecord }: HomeTabPro
             : undefined;
 
     return {
-      startDate: formatDateInput(date),
+      date: dateKey,
+      periodQuestion: prompt.question,
+      periodAnswer: prompt.answer ?? "no",
+      time: boundaryTime,
       flowLevel,
       symptoms: nextDraft.pain === "无痛" ? [] : [nextDraft.pain],
       mood: nextDraft.mood,
@@ -294,10 +335,24 @@ export function HomeTab({ summary, records, settings, onSaveRecord }: HomeTabPro
 
     if (!selectedDate) return;
 
-    onSaveRecord(buildRecordInput(selectedDate, nextDraft));
+    onSaveDayStatus(buildDayLogInput(selectedDate, nextDraft));
   }
 
-  const selectedRecord = selectedDate ? recordsByDate.get(formatDateInput(selectedDate)) : undefined;
+  function handlePeriodAnswer(answer: PeriodAnswer) {
+    if (!selectedDate) return;
+
+    const dateKey = formatDateInput(selectedDate);
+    const prompt = getPeriodPromptForDate(dateKey);
+    const time = boundaryTime || currentTimeInput();
+    setBoundaryTime(time);
+    onAnswerPeriodPrompt(dateKey, prompt.question, answer, time);
+  }
+
+  const selectedDateKey = selectedDate ? formatDateInput(selectedDate) : "";
+  const selectedLog = selectedDate ? logsByDate.get(selectedDateKey) : undefined;
+  const selectedPrompt = selectedDate ? getPeriodPromptForDate(selectedDateKey) : null;
+  const openEndDate =
+    selectedDate && selectedDate.getTime() > today.getTime() ? formatDateInput(selectedDate) : formatDateInput(today);
   const selectedTitle = selectedDate
     ? `${selectedDate.getMonth() + 1}月${selectedDate.getDate()}日 ${formatWeekday(selectedDate)}`
     : "选择日期记录状态";
@@ -351,16 +406,16 @@ export function HomeTab({ summary, records, settings, onSaveRecord }: HomeTabPro
         <div className="grid grid-cols-7 gap-y-1">
           {calendarDays.map((calendarDay) => {
             const dateKey = formatDateInput(calendarDay.date);
-            const dateRecord = recordsByDate.get(dateKey);
+            const dateLog = logsByDate.get(dateKey);
             const isCurrentDay = isSameDate(calendarDay.date, today);
-            const predictedPeriod = !dateRecord && isPredictedPeriodDate(calendarDay.date, summary, settings);
-            const periodRole = periodRoleForDate(recordsByDate, calendarDay.date);
+            const predictedPeriod = !dateLog && isPredictedPeriodDate(calendarDay.date, summary, settings);
+            const periodRole = periodRoleForDate(periods, calendarDay.date, openEndDate);
             const isSelected = selectedDate ? isSameDate(selectedDate, calendarDay.date) : false;
             const labelParts = [
               `${calendarDay.date.getMonth() + 1}月${calendarDay.day}日`,
-              periodLabel(periodRole, dateRecord),
+              periodLabel(periodRole, dateLog),
               predictedPeriod ? "预测经期" : "",
-              dateRecord ? "已记录" : "",
+              dateLog ? "已记录" : "",
               isCurrentDay ? "今天" : ""
             ].filter(Boolean);
 
@@ -376,22 +431,11 @@ export function HomeTab({ summary, records, settings, onSaveRecord }: HomeTabPro
                   calendarDay.currentMonth && "text-[#1D1D1F]"
                 )}
               >
-                {periodRole ? (
-                  <span
-                    className={cn(
-                      "absolute left-0 right-0 top-1 h-10 bg-[#F6D9DC]",
-                      periodRole === "single" && "left-1/2 right-auto w-10 -translate-x-1/2 rounded-full",
-                      periodRole === "start" && "left-1/2 rounded-l-full",
-                      periodRole === "middle" && "rounded-none",
-                      periodRole === "end" && "right-1/2 rounded-r-full"
-                    )}
-                  />
-                ) : null}
                 <span
                   className={cn(
-                    "relative z-10 flex h-12 w-12 items-center justify-center rounded-full transition",
+                    "relative z-10 flex h-10 w-10 items-center justify-center rounded-full transition",
                     calendarDay.currentMonth && !periodRole && !predictedPeriod && "group-hover:bg-gray-100",
-                    periodRole && !isCurrentDay && "text-[#A85E67]",
+                    periodRole && !isCurrentDay && "bg-[#F6D9DC] text-[#A85E67]",
                     predictedPeriod && "bg-[#F8EEF0] text-[#DFA4A9]",
                     isCurrentDay && "bg-[#1D1D1F] text-white",
                     isSelected && "ring-2 ring-[#E94D8A] ring-offset-2 ring-offset-white"
@@ -399,11 +443,12 @@ export function HomeTab({ summary, records, settings, onSaveRecord }: HomeTabPro
                 >
                   {calendarDay.day}
                 </span>
-                {dateRecord ? (
+                {dateLog ? (
                   <span className="-mt-1 flex h-3 gap-0.5 text-[8px]" aria-label="已记录">
-                    {dateRecord.flowLevel ? "💧" : null}
-                    {dateRecord.symptoms?.length ? "❤️" : null}
-                    {dateRecord.mood ? "😊" : null}
+                    {dateLog.flowLevel ? "💧" : null}
+                    {dateLog.symptoms?.length ? "❤️" : null}
+                    {dateLog.mood ? "😊" : null}
+                    {!dateLog.flowLevel && !dateLog.symptoms?.length && !dateLog.mood ? "✓" : null}
                   </span>
                 ) : (
                   <span className="h-3" />
@@ -438,24 +483,67 @@ export function HomeTab({ summary, records, settings, onSaveRecord }: HomeTabPro
           <div>
             <h2 className="text-[19px] font-semibold tracking-[-0.01em]">{selectedTitle}</h2>
             <p className="mt-1 text-[12px] text-gray-400">
-              {selectedRecord ? "已记录，可继续调整" : selectedDate ? "还没有记录" : "点击日历日期后编辑"}
+              {selectedLog ? "已记录，可继续调整" : selectedDate ? "还没有记录" : "点击日历日期后编辑"}
             </p>
           </div>
           <Moon className="h-5 w-5 text-[#DFA4A9]" />
         </div>
 
-        <StatusRow
-          title="月经走喽"
-          icon={<ToggleLeft className="h-4 w-4" />}
-          options={PERIOD_OPTIONS}
-          selected={draft.flow === "无" ? "否" : "是"}
-          onSelect={(period) => {
-            updateDraft({
-              ...draft,
-              flow: period === "是" && draft.flow === "无" ? "正常" : period === "否" ? "无" : draft.flow
-            });
-          }}
-        />
+        <section className="mb-3 rounded-[24px] bg-gradient-to-br from-[#FFF4F6] to-white p-4 shadow-[inset_0_0_0_1px_rgba(223,164,169,0.22)]">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F6D9DC] text-[#A85E67]">
+                <ToggleLeft className="h-5 w-5" />
+              </span>
+              <div>
+                <h3 className="text-[20px] font-semibold tracking-[-0.01em]">
+                  {selectedPrompt?.question === "end" ? "月经走喽" : "月经来了"}
+                </h3>
+                <p className="mt-0.5 text-[12px] text-gray-400">
+                  {selectedPrompt?.answer === "yes"
+                    ? "已记录为是，可点否撤销"
+                    : selectedPrompt?.answer === "no"
+                      ? "已确认不是"
+                      : "选择后自动保存"}
+                </p>
+              </div>
+            </div>
+            <label className="flex shrink-0 flex-col text-[11px] font-medium text-gray-400">
+              时间
+              <input
+                aria-label="记录时间"
+                type="time"
+                value={boundaryTime}
+                onChange={(event) => setBoundaryTime(event.target.value)}
+                className="mt-1 h-9 w-[88px] rounded-full border border-[#F0C9CF] bg-white px-2 text-[13px] font-semibold text-[#A85E67] outline-none focus:ring-2 focus:ring-[#E94D8A]/30"
+              />
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {PERIOD_OPTIONS.map((option) => {
+              const answer: PeriodAnswer = option === "是" ? "yes" : "no";
+              const isSelected = selectedPrompt?.answer === answer;
+
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => handlePeriodAnswer(answer)}
+                  disabled={!selectedDate}
+                  className={cn(
+                    "h-12 rounded-full text-[15px] font-semibold transition disabled:opacity-50",
+                    isSelected
+                      ? "bg-[#E94D8A] text-white shadow-[0_10px_22px_rgba(233,77,138,0.24)]"
+                      : "bg-white text-gray-500 shadow-[inset_0_0_0_1px_rgba(229,231,235,0.95)] hover:text-[#A85E67]"
+                  )}
+                >
+                  {option}
+                </button>
+              );
+            })}
+          </div>
+        </section>
         <StatusRow
           title="流量"
           icon={<Droplets className="h-4 w-4" />}

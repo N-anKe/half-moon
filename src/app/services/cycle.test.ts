@@ -93,4 +93,84 @@ describe("createPeriodService", () => {
     expect(result.summary.phase).toBe("follicular");
     expect(service.getRecords()).toHaveLength(1);
   });
+
+  test("starts with a period-start prompt when there is no cycle period", () => {
+    const service = createPeriodService(new LocalPeriodRepository(), fixedToday);
+
+    const prompt = service.getPeriodPromptForDate("2026-05-19");
+
+    expect(prompt).toEqual({
+      question: "start",
+      answer: null,
+      time: "",
+      activePeriod: null
+    });
+  });
+
+  test("switches from start to end prompt on the day after a period starts", () => {
+    const service = createPeriodService(new LocalPeriodRepository(), fixedToday);
+
+    service.answerPeriodPrompt("2026-05-10", "start", "yes", "08:30");
+
+    expect(service.getPeriodPromptForDate("2026-05-10")).toMatchObject({
+      question: "start",
+      answer: "yes",
+      time: "08:30"
+    });
+    expect(service.getPeriodPromptForDate("2026-05-11")).toMatchObject({
+      question: "end",
+      answer: null
+    });
+  });
+
+  test("closes a period inclusively and returns to start prompt the next day", () => {
+    const service = createPeriodService(new LocalPeriodRepository(), fixedToday);
+
+    service.answerPeriodPrompt("2026-05-10", "start", "yes", "08:30");
+    service.answerPeriodPrompt("2026-05-14", "end", "yes", "21:15");
+
+    expect(service.getPeriodRanges()).toMatchObject([
+      {
+        id: expect.any(String),
+        startDate: "2026-05-10",
+        startTime: "08:30",
+        endDate: "2026-05-14",
+        endTime: "21:15"
+      }
+    ]);
+    expect(service.getPeriodPromptForDate("2026-05-15")).toMatchObject({
+      question: "start",
+      answer: null
+    });
+  });
+
+  test("saves a no answer without changing the period prompt state", () => {
+    const service = createPeriodService(new LocalPeriodRepository(), fixedToday);
+
+    service.answerPeriodPrompt("2026-05-10", "start", "no", "09:00");
+
+    expect(service.getPeriodPromptForDate("2026-05-10")).toMatchObject({
+      question: "start",
+      answer: "no",
+      time: "09:00"
+    });
+    expect(service.getPeriodPromptForDate("2026-05-11")).toMatchObject({
+      question: "start",
+      answer: null
+    });
+    expect(service.getPeriodRanges()).toEqual([]);
+  });
+
+  test("changing a yes answer to no removes the matching boundary event", () => {
+    const service = createPeriodService(new LocalPeriodRepository(), fixedToday);
+
+    service.answerPeriodPrompt("2026-05-10", "start", "yes", "08:30");
+    service.answerPeriodPrompt("2026-05-10", "start", "no", "10:00");
+
+    expect(service.getPeriodRanges()).toEqual([]);
+    expect(service.getPeriodPromptForDate("2026-05-11")).toMatchObject({
+      question: "start",
+      answer: null
+    });
+  });
 });

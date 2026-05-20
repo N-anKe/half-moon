@@ -3,7 +3,12 @@ import { BottomNav } from "./components/BottomNav";
 import { HomeTab } from "./components/HomeTab";
 import { InsightsTab } from "./components/InsightsTab";
 import { ProfileTab } from "./components/ProfileTab";
-import type { PeriodRecordInput, PeriodServiceSnapshot } from "./models/cycle";
+import type {
+  DayStatusLogInput,
+  PeriodAnswer,
+  PeriodQuestion,
+  PeriodServiceSnapshot
+} from "./models/cycle";
 import { createPeriodService, LocalPeriodRepository } from "./services/cycle";
 
 export type TabKey = "home" | "insights" | "profile";
@@ -13,10 +18,17 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>("home");
   const [snapshot, setSnapshot] = useState<PeriodServiceSnapshot>(() => service.getSnapshot());
 
-  function handleSaveRecord(input: PeriodRecordInput) {
-    const existingRecord = service.getRecords().find((record) => record.startDate === input.startDate);
+  function handleSaveDayStatus(input: DayStatusLogInput) {
+    setSnapshot(service.saveDayStatusLog(input));
+  }
 
-    setSnapshot(existingRecord ? service.updateRecord(existingRecord.id, input) : service.addRecord(input));
+  function handleAnswerPeriodPrompt(
+    date: string,
+    question: PeriodQuestion,
+    answer: PeriodAnswer,
+    time: string
+  ) {
+    setSnapshot(service.answerPeriodPrompt(date, question, answer, time));
   }
 
   return (
@@ -25,10 +37,13 @@ export default function App() {
         <div className="flex-1 overflow-y-auto pb-32 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {activeTab === "home" ? (
           <HomeTab
-            records={snapshot.records}
+            dayLogs={snapshot.dayLogs}
+            periods={snapshot.periods}
             settings={snapshot.settings}
             summary={snapshot.summary}
-            onSaveRecord={handleSaveRecord}
+            getPeriodPromptForDate={service.getPeriodPromptForDate}
+            onAnswerPeriodPrompt={handleAnswerPeriodPrompt}
+            onSaveDayStatus={handleSaveDayStatus}
           />
         ) : null}
         {activeTab === "insights" ? (

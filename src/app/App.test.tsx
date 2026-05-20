@@ -40,7 +40,7 @@ describe("Half Moon app", () => {
     expect(screen.getByText("身体数据档案")).toBeInTheDocument();
   });
 
-  test("automatically saves a period record when a selected date status changes", async () => {
+  test("automatically saves a day status log when a selected date status changes", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -52,10 +52,9 @@ describe("Half Moon app", () => {
     await user.click(screen.getByRole("button", { name: "正常" }));
     await user.click(screen.getByRole("button", { name: "轻微" }));
 
-    expect(screen.getByText("卵泡期，第10天")).toBeInTheDocument();
-    expect(localStorage.getItem("half-moon.period-records")).toContain("2026-05-10");
-    expect(localStorage.getItem("half-moon.period-records")).toContain("轻微");
-    expect(JSON.parse(localStorage.getItem("half-moon.period-records") ?? "[]")).toHaveLength(1);
+    expect(localStorage.getItem("half-moon.day-status-logs")).toContain("2026-05-10");
+    expect(localStorage.getItem("half-moon.day-status-logs")).toContain("轻微");
+    expect(JSON.parse(localStorage.getItem("half-moon.day-status-logs") ?? "[]")).toHaveLength(1);
   });
 
   test("switches calendar months with previous and next controls", async () => {
@@ -88,19 +87,64 @@ describe("Half Moon app", () => {
     expect(screen.getByRole("button", { name: /5月13日 非经期/ })).toBeInTheDocument();
   });
 
-  test("inherits the previous day period status without creating a record until changed", async () => {
+  test("migrates a legacy period day into an open period and saves later edits as day logs", async () => {
     const user = userEvent.setup();
     seedRecords([{ startDate: "2026-05-10", flowLevel: "medium", mood: "平静" }]);
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: /5月11日/ }));
 
-    expect(screen.getByRole("button", { name: "是", pressed: true })).toBeInTheDocument();
+    expect(screen.getByText("月经走喽")).toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem("half-moon.period-records") ?? "[]")).toHaveLength(1);
 
     await user.click(screen.getByRole("button", { name: "轻微" }));
 
-    expect(JSON.parse(localStorage.getItem("half-moon.period-records") ?? "[]")).toHaveLength(2);
-    expect(localStorage.getItem("half-moon.period-records")).toContain("2026-05-11");
+    expect(JSON.parse(localStorage.getItem("half-moon.day-status-logs") ?? "[]")).toHaveLength(2);
+    expect(localStorage.getItem("half-moon.day-status-logs")).toContain("2026-05-11");
+  });
+
+  test("promotes the period boundary prompt with a default time", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /5月10日/ }));
+
+    expect(screen.getByText("月经来了")).toBeInTheDocument();
+    const timeInput = screen.getByLabelText("记录时间") as HTMLInputElement;
+    expect(timeInput.value).toMatch(/^\d{2}:\d{2}$/);
+
+    await user.click(screen.getByRole("button", { name: "是" }));
+
+    expect(screen.getByRole("button", { name: /5月10日 经期开始/ })).toBeInTheDocument();
+    expect(localStorage.getItem("half-moon.cycle-periods")).toContain("2026-05-10");
+    expect(localStorage.getItem("half-moon.day-status-logs")).toContain("\"periodAnswer\":\"yes\"");
+  });
+
+  test("shows the end prompt after a period starts and closes the inclusive calendar range", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem(
+      "half-moon.cycle-periods",
+      JSON.stringify([
+        {
+          id: "period-1",
+          startDate: "2026-05-10",
+          startTime: "08:30",
+          createdAt: "2026-05-10T00:00:00.000Z",
+          updatedAt: "2026-05-10T00:00:00.000Z"
+        }
+      ])
+    );
+
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /5月14日/ }));
+
+    expect(screen.getByText("月经走喽")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "是" }));
+
+    expect(screen.getByRole("button", { name: /5月10日 经期开始/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /5月14日 经期结束/ })).toBeInTheDocument();
+    expect(localStorage.getItem("half-moon.cycle-periods")).toContain("\"endDate\":\"2026-05-14\"");
   });
 });

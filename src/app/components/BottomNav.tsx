@@ -17,7 +17,7 @@ export function BottomNav({ activeTab, onChange }: BottomNavProps) {
   return (
     <nav
       aria-label="底部导航"
-      className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[430px] px-6 pb-[calc(env(safe-area-inset-bottom)+20px)] sm:bottom-8 sm:px-6 sm:pb-0"
+      className="fixed inset-x-0 bottom-0 z-40 mx-auto w-full max-w-[430px] px-6 pb-[calc(env(safe-area-inset-bottom)+12px)] sm:bottom-8 sm:px-6 sm:pb-0"
     >
       <div className="liquid-glass-nav grid grid-cols-3 p-2">
         {tabs.map(({ key, label, icon: Icon }) => {
