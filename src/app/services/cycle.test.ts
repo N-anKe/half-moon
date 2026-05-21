@@ -1,23 +1,34 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import {
+  calculateCycleInsights,
   DEFAULT_CYCLE_SETTINGS,
   calculateCycleSummary,
   createPeriodService,
   LocalPeriodRepository
 } from "./cycle";
-import type { PeriodRecord } from "../models/cycle";
+import type { CyclePeriod, DayStatusLog } from "../models/cycle";
 
 const fixedToday = new Date("2026-05-19T08:00:00.000Z");
 
-function makeRecord(overrides: Partial<PeriodRecord> = {}): PeriodRecord {
+function makePeriod(overrides: Partial<CyclePeriod> = {}): CyclePeriod {
   return {
-    id: "record-1",
+    id: "period-1",
     startDate: "2026-05-10",
+    startTime: "08:30",
     endDate: "2026-05-14",
-    flowLevel: "medium",
-    symptoms: ["cramps"],
-    mood: "calm",
-    notes: "测试记录",
+    createdAt: "2026-05-10T00:00:00.000Z",
+    updatedAt: "2026-05-10T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+function makeLog(overrides: Partial<DayStatusLog> = {}): DayStatusLog {
+  return {
+    id: "log-1",
+    date: "2026-05-10",
+    periodQuestion: "start",
+    periodAnswer: "yes",
+    time: "08:30",
     createdAt: "2026-05-10T00:00:00.000Z",
     updatedAt: "2026-05-10T00:00:00.000Z",
     ...overrides
@@ -25,7 +36,7 @@ function makeRecord(overrides: Partial<PeriodRecord> = {}): PeriodRecord {
 }
 
 describe("calculateCycleSummary", () => {
-  test("returns an empty-state summary when there are no records", () => {
+  test("returns an empty-state summary when there are no periods", () => {
     const summary = calculateCycleSummary([], DEFAULT_CYCLE_SETTINGS, fixedToday);
 
     expect(summary.phase).toBe("unknown");
@@ -34,8 +45,8 @@ describe("calculateCycleSummary", () => {
     expect(summary.nextPeriodDate).toBeNull();
   });
 
-  test("predicts current cycle status from the latest period record", () => {
-    const summary = calculateCycleSummary([makeRecord()], DEFAULT_CYCLE_SETTINGS, fixedToday);
+  test("predicts current cycle status from the latest cycle period", () => {
+    const summary = calculateCycleSummary([makePeriod()], DEFAULT_CYCLE_SETTINGS, fixedToday);
 
     expect(summary.phase).toBe("follicular");
     expect(summary.currentDay).toBe(10);
@@ -48,18 +59,59 @@ describe("calculateCycleSummary", () => {
   });
 });
 
+describe("calculateCycleInsights", () => {
+  test("calculates averages, trend data, and recorded days from current records", () => {
+    const insights = calculateCycleInsights(
+      [
+        makePeriod({ id: "period-3", startDate: "2026-05-08", endDate: "2026-05-12" }),
+        makePeriod({ id: "period-2", startDate: "2026-04-10", endDate: "2026-04-15" }),
+        makePeriod({ id: "period-1", startDate: "2026-03-13", endDate: "2026-03-17" })
+      ],
+      [
+        makeLog({ id: "log-1", date: "2026-05-08" }),
+        makeLog({ id: "log-2", date: "2026-05-08", periodQuestion: "end" }),
+        makeLog({ id: "log-3", date: "2026-05-09" })
+      ],
+      DEFAULT_CYCLE_SETTINGS
+    );
+
+    expect(insights).toEqual({
+      averageCycleLength: 28,
+      averagePeriodLength: 5.3,
+      recordedDays: 2,
+      cycleTrend: [
+        { id: "2026-04-10", label: "4/10", value: 28 },
+        { id: "2026-05-08", label: "5/8", value: 28 }
+      ]
+    });
+  });
+
+  test("falls back to settings when there is not enough period data", () => {
+    const insights = calculateCycleInsights(
+      [makePeriod({ startDate: "2026-05-08", endDate: undefined })],
+      [],
+      { averageCycleLength: 30, averagePeriodLength: 6 }
+    );
+
+    expect(insights.averageCycleLength).toBe(30);
+    expect(insights.averagePeriodLength).toBe(6);
+    expect(insights.recordedDays).toBe(0);
+    expect(insights.cycleTrend).toEqual([]);
+  });
+});
+
 describe("LocalPeriodRepository", () => {
   beforeEach(() => {
     localStorage.clear();
   });
 
-  test("recovers to an empty list and logs a useful error when stored data is invalid", () => {
+  test("recovers to an empty period list and logs a useful error when stored data is invalid", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    localStorage.setItem("half-moon.period-records", "{broken json");
+    localStorage.setItem("half-moon.cycle-periods", "{broken json");
 
     const repository = new LocalPeriodRepository();
 
-    expect(repository.getRecords()).toEqual([]);
+    expect(repository.getCyclePeriods()).toEqual([]);
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining("[DEBUG]"),
       expect.any(Error)
@@ -72,26 +124,15 @@ describe("createPeriodService", () => {
     localStorage.clear();
   });
 
-  test("adds a period record and returns an updated cycle summary", () => {
+  test("answers a period prompt and returns updated summary and insights", () => {
     const service = createPeriodService(new LocalPeriodRepository(), fixedToday);
 
-    const result = service.addRecord({
-      startDate: "2026-05-10",
-      endDate: "2026-05-14",
-      flowLevel: "medium",
-      symptoms: ["cramps"],
-      mood: "calm",
-      notes: "第一条记录"
-    });
+    const result = service.answerPeriodPrompt("2026-05-10", "start", "yes", "08:30");
 
-    expect(result.records).toHaveLength(1);
-    expect(result.records[0]).toMatchObject({
-      startDate: "2026-05-10",
-      endDate: "2026-05-14",
-      flowLevel: "medium"
-    });
+    expect(result.periods).toHaveLength(1);
     expect(result.summary.phase).toBe("follicular");
-    expect(service.getRecords()).toHaveLength(1);
+    expect(result.insights.recordedDays).toBe(1);
+    expect(service.getCyclePeriods()).toHaveLength(1);
   });
 
   test("saves structured day status details without losing existing daily status fields", () => {

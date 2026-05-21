@@ -8,16 +8,35 @@ describe("Half Moon app", () => {
     localStorage.clear();
   });
 
-  function seedRecords(records: Array<Record<string, unknown>>) {
+  function seedPeriods(periods: Array<Record<string, unknown>>) {
     localStorage.setItem(
-      "half-moon.period-records",
+      "half-moon.cycle-periods",
       JSON.stringify(
-        records.map((record, index) => ({
-          id: `record-${index + 1}`,
+        periods.map((period, index) => ({
+          id: `period-${index + 1}`,
           startDate: "2026-05-10",
+          startTime: "08:30",
           createdAt: "2026-05-10T00:00:00.000Z",
           updatedAt: "2026-05-10T00:00:00.000Z",
-          ...record
+          ...period
+        }))
+      )
+    );
+  }
+
+  function seedDayLogs(logs: Array<Record<string, unknown>>) {
+    localStorage.setItem(
+      "half-moon.day-status-logs",
+      JSON.stringify(
+        logs.map((log, index) => ({
+          id: `log-${index + 1}`,
+          date: "2026-05-10",
+          periodQuestion: "start",
+          periodAnswer: "yes",
+          time: "08:30",
+          createdAt: "2026-05-10T00:00:00.000Z",
+          updatedAt: "2026-05-10T00:00:00.000Z",
+          ...log
         }))
       )
     );
@@ -128,6 +147,8 @@ describe("Half Moon app", () => {
     expect(screen.getByLabelText("流量 正常")).toBeInTheDocument();
     expect(screen.getByLabelText("痛经 轻微")).toBeInTheDocument();
     expect(screen.getByLabelText("心情 平静")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /5月10日/ })).toHaveClass("h-[66px]");
+    expect(screen.getByLabelText("已记录")).not.toHaveClass("-mt-1");
     expect(screen.queryByText("💧")).not.toBeInTheDocument();
     expect(screen.queryByText("❤️")).not.toBeInTheDocument();
     expect(screen.queryByText("😊")).not.toBeInTheDocument();
@@ -147,12 +168,13 @@ describe("Half Moon app", () => {
     expect(screen.getByText("2026年 5月")).toBeInTheDocument();
   });
 
-  test("renders continuous period ranges from saved records and stops at a no-period day", () => {
-    seedRecords([
-      { startDate: "2026-05-10", flowLevel: "medium", mood: "平静" },
-      { startDate: "2026-05-11", flowLevel: "medium", mood: "平静" },
-      { startDate: "2026-05-12", flowLevel: "medium", mood: "平静" },
-      { startDate: "2026-05-13", mood: "平静" }
+  test("renders continuous period ranges from saved cycle periods and separate day logs", () => {
+    seedPeriods([{ startDate: "2026-05-10", endDate: "2026-05-12" }]);
+    seedDayLogs([
+      { date: "2026-05-10", flowLevel: "medium", mood: "平静" },
+      { date: "2026-05-11", flowLevel: "medium", mood: "平静", periodQuestion: "end", periodAnswer: "no" },
+      { date: "2026-05-12", flowLevel: "medium", mood: "平静", periodQuestion: "end" },
+      { date: "2026-05-13", periodAnswer: "no", mood: "平静" }
     ]);
 
     render(<App />);
@@ -163,20 +185,38 @@ describe("Half Moon app", () => {
     expect(screen.getByRole("button", { name: /5月13日 非经期/ })).toBeInTheDocument();
   });
 
-  test("migrates a legacy period day into an open period and saves later edits as day logs", async () => {
+  test("syncs insights with saved cycle periods and day logs", async () => {
     const user = userEvent.setup();
-    seedRecords([{ startDate: "2026-05-10", flowLevel: "medium", mood: "平静" }]);
+    seedPeriods([
+      { id: "period-3", startDate: "2026-05-08", endDate: "2026-05-12" },
+      { id: "period-2", startDate: "2026-04-10", endDate: "2026-04-15" },
+      { id: "period-1", startDate: "2026-03-13", endDate: "2026-03-17" }
+    ]);
+    seedDayLogs([
+      { id: "log-1", date: "2026-05-08" },
+      { id: "log-2", date: "2026-05-08", periodQuestion: "end" },
+      { id: "log-3", date: "2026-05-09" }
+    ]);
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /5月11日/ }));
+    await user.click(screen.getByRole("button", { name: "分析" }));
 
-    expect(screen.getByText("月经走喽")).toBeInTheDocument();
-    expect(JSON.parse(localStorage.getItem("half-moon.period-records") ?? "[]")).toHaveLength(1);
+    expect(screen.getByText("28天")).toBeInTheDocument();
+    expect(screen.getByText("5.3天")).toBeInTheDocument();
+    expect(screen.getByText("2 天")).toBeInTheDocument();
+    expect(screen.getByText("4/10")).toBeInTheDocument();
+    expect(screen.getByText("5/8")).toBeInTheDocument();
+  });
 
-    await user.click(screen.getByRole("button", { name: "轻微" }));
+  test("shows an empty trend state when there is not enough cycle data", async () => {
+    const user = userEvent.setup();
+    seedPeriods([{ startDate: "2026-05-10" }]);
+    render(<App />);
 
-    expect(JSON.parse(localStorage.getItem("half-moon.day-status-logs") ?? "[]")).toHaveLength(2);
-    expect(localStorage.getItem("half-moon.day-status-logs")).toContain("2026-05-11");
+    await user.click(screen.getByRole("button", { name: "分析" }));
+
+    expect(screen.getByText("记录至少两次经期后生成趋势")).toBeInTheDocument();
+    expect(screen.queryByText("Recharts 风格柱状图")).not.toBeInTheDocument();
   });
 
   test("promotes the period boundary prompt with a default time", async () => {

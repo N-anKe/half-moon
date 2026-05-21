@@ -1,21 +1,11 @@
 import { type ReactNode } from "react";
 import { Activity, BarChart3, CalendarHeart, Droplets, TrendingUp } from "lucide-react";
-import type { CycleSummary, PeriodRecord, UserCycleSettings } from "../models/cycle";
+import type { CycleInsights, CycleSummary } from "../models/cycle";
 
 interface InsightsTabProps {
   summary: CycleSummary;
-  records: PeriodRecord[];
-  settings: UserCycleSettings;
+  insights: CycleInsights;
 }
-
-const chartData = [
-  { id: "d1", label: "1", value: 28 },
-  { id: "d2", label: "2", value: 24 },
-  { id: "d3", label: "3", value: 31 },
-  { id: "d4", label: "4", value: 27 },
-  { id: "d5", label: "5", value: 29 },
-  { id: "d6", label: "6", value: 26 }
-];
 
 function StatCard({
   icon,
@@ -40,7 +30,13 @@ function StatCard({
   );
 }
 
-export function InsightsTab({ summary, records, settings }: InsightsTabProps) {
+function formatDays(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+export function InsightsTab({ summary, insights }: InsightsTabProps) {
+  const maxTrendValue = Math.max(...insights.cycleTrend.map((item) => item.value), 1);
+
   return (
     <div className="px-6 pb-4 pt-8">
       <header className="mb-7">
@@ -52,14 +48,14 @@ export function InsightsTab({ summary, records, settings }: InsightsTabProps) {
         <StatCard
           icon={<TrendingUp className="h-5 w-5" />}
           label="平均周期"
-          value={`${settings.averageCycleLength}天`}
-          detail="近 6 次估算"
+          value={`${formatDays(insights.averageCycleLength)}天`}
+          detail="按经期开始日计算"
         />
         <StatCard
           icon={<Droplets className="h-5 w-5" />}
           label="经期天数"
-          value={`${settings.averagePeriodLength}天`}
-          detail="默认档案"
+          value={`${formatDays(insights.averagePeriodLength)}天`}
+          detail="按已闭合经期计算"
         />
       </div>
 
@@ -67,21 +63,28 @@ export function InsightsTab({ summary, records, settings }: InsightsTabProps) {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h2 className="text-[20px] font-semibold text-[#1D1D1F]">周期长度趋势</h2>
-            <p className="mt-1 text-[13px] text-gray-400">Recharts 风格柱状图</p>
+            <p className="mt-1 text-[13px] text-gray-400">最近周期间隔</p>
           </div>
           <BarChart3 className="h-5 w-5 text-[#DFA4A9]" />
         </div>
-        <div className="flex h-44 items-end gap-3">
-          {chartData.map((item) => (
-            <div key={item.id} className="flex flex-1 flex-col items-center gap-2">
-              <div
-                className="w-full rounded-t-[18px] bg-gradient-to-t from-[#DFA4A9] to-[#F6D9DC]"
-                style={{ height: `${item.value * 4}px` }}
-              />
-              <span className="text-[11px] text-gray-400">{item.label}</span>
-            </div>
-          ))}
-        </div>
+        {insights.cycleTrend.length ? (
+          <div className="flex h-44 items-end gap-3">
+            {insights.cycleTrend.map((item) => (
+              <div key={item.id} className="flex flex-1 flex-col items-center gap-2">
+                <div
+                  aria-label={`${item.label} 周期 ${item.value} 天`}
+                  className="w-full rounded-t-[18px] bg-gradient-to-t from-[#DFA4A9] to-[#F6D9DC]"
+                  style={{ height: `${Math.max((item.value / maxTrendValue) * 150, 16)}px` }}
+                />
+                <span className="text-[11px] text-gray-400">{item.label}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex h-44 items-center justify-center rounded-[24px] bg-gray-50 px-6 text-center text-[13px] leading-5 text-gray-400">
+            记录至少两次经期后生成趋势
+          </div>
+        )}
       </section>
 
       <section className="rounded-[34px] bg-white p-5 shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
@@ -98,7 +101,9 @@ export function InsightsTab({ summary, records, settings }: InsightsTabProps) {
           </div>
           <div className="flex items-center justify-between rounded-[22px] bg-gray-50 px-4 py-3">
             <span className="text-[14px] text-gray-500">已记录</span>
-            <span className="text-[14px] font-semibold text-[#1D1D1F]">{records.length} 天</span>
+            <span className="text-[14px] font-semibold text-[#1D1D1F]">
+              {insights.recordedDays} 天
+            </span>
           </div>
           <div className="flex items-center gap-3 rounded-[22px] bg-gray-50 px-4 py-3">
             <Activity className="h-4 w-4 text-[#DFA4A9]" />

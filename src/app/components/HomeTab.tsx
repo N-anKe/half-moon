@@ -298,7 +298,7 @@ function CalendarRecordIcons({ log }: { log: DayStatusLog }) {
   }
 
   return (
-    <span className="-mt-1 flex h-3 items-center justify-center gap-0.5" aria-label="已记录">
+    <span className="mt-1 flex h-3 items-center justify-center gap-0.5" aria-label="已记录">
       {icons.slice(0, 3).map(({ Icon, label, color, strokeWidth }) => (
         <span key={label} aria-label={label} role="img">
           <Icon
@@ -912,7 +912,7 @@ export function HomeTab({
                 onClick={() => openDate(calendarDay.date)}
                 aria-label={labelParts.join(" ")}
                 className={cn(
-                  "group relative mx-auto flex h-[58px] w-full flex-col items-center justify-start text-[15px] transition",
+                  "group relative mx-auto flex h-[66px] w-full flex-col items-center justify-start text-[15px] transition",
                   !calendarDay.currentMonth && "text-gray-300 opacity-60",
                   calendarDay.currentMonth && "text-[#1D1D1F]"
                 )}

@@ -1,4 +1,5 @@
 import type {
+  CycleInsights,
   CyclePeriod,
   CyclePhase,
   CycleSummary,
@@ -6,8 +7,6 @@ import type {
   DayStatusLogInput,
   PeriodAnswer,
   PeriodPrompt,
-  PeriodRecord,
-  PeriodRecordInput,
   PeriodQuestion,
   PeriodRepository,
   PeriodService,
@@ -16,7 +15,6 @@ import type {
 } from "../models/cycle";
 import { logDebugError } from "../utils/debug";
 
-const RECORDS_KEY = "half-moon.period-records";
 const PERIODS_KEY = "half-moon.cycle-periods";
 const DAY_LOGS_KEY = "half-moon.day-status-logs";
 const SETTINGS_KEY = "half-moon.cycle-settings";
@@ -51,28 +49,12 @@ function differenceInDays(from: string, to: Date): number {
   return Math.floor((toDate.getTime() - fromTime) / DAY_IN_MS);
 }
 
-function sortRecords(records: PeriodRecord[]): PeriodRecord[] {
-  return [...records].sort((a, b) => b.startDate.localeCompare(a.startDate));
-}
-
 function sortPeriods(periods: CyclePeriod[]): CyclePeriod[] {
   return [...periods].sort((a, b) => b.startDate.localeCompare(a.startDate));
 }
 
 function sortDayLogs(logs: DayStatusLog[]): DayStatusLog[] {
   return [...logs].sort((a, b) => b.date.localeCompare(a.date));
-}
-
-function isPeriodRecord(value: unknown): value is PeriodRecord {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Partial<PeriodRecord>;
-
-  return (
-    typeof record.id === "string" &&
-    typeof record.startDate === "string" &&
-    typeof record.createdAt === "string" &&
-    typeof record.updatedAt === "string"
-  );
 }
 
 function isCyclePeriod(value: unknown): value is CyclePeriod {
@@ -100,63 +82,6 @@ function isDayStatusLog(value: unknown): value is DayStatusLog {
     typeof log.time === "string" &&
     typeof log.createdAt === "string" &&
     typeof log.updatedAt === "string"
-  );
-}
-
-function legacyRecordsToPeriods(records: PeriodRecord[]): CyclePeriod[] {
-  const flowRecords = [...records].filter((record) => record.flowLevel).sort((a, b) => a.startDate.localeCompare(b.startDate));
-  const periods: CyclePeriod[] = [];
-  let active: CyclePeriod | null = null;
-
-  for (const record of flowRecords) {
-    if (!active) {
-      active = {
-        id: `migrated-${record.id}`,
-        startDate: record.startDate,
-        startTime: "08:00",
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt
-      };
-      continue;
-    }
-
-    if (record.startDate === addDays(active.endDate ?? active.startDate, 1)) {
-      active.endDate = record.startDate;
-      active.endTime = "21:00";
-      active.updatedAt = record.updatedAt;
-      continue;
-    }
-
-    periods.push(active);
-    active = {
-      id: `migrated-${record.id}`,
-      startDate: record.startDate,
-      startTime: "08:00",
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt
-    };
-  }
-
-  if (active) periods.push(active);
-
-  return sortPeriods(periods);
-}
-
-function legacyRecordsToDayLogs(records: PeriodRecord[]): DayStatusLog[] {
-  return sortDayLogs(
-    records.map((record) => ({
-      id: `migrated-log-${record.id}`,
-      date: record.startDate,
-      periodQuestion: record.flowLevel ? "start" : "start",
-      periodAnswer: record.flowLevel ? "yes" : "no",
-      time: "08:00",
-      flowLevel: record.flowLevel,
-      symptoms: record.symptoms,
-      mood: record.mood,
-      notes: record.notes,
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt
-    }))
   );
 }
 
@@ -192,14 +117,30 @@ function resolvePhase(currentDay: number, periodLength: number, fertileWindowDay
   return "follicular";
 }
 
+function roundToOneDecimal(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function average(values: number[]): number | null {
+  if (!values.length) return null;
+
+  return roundToOneDecimal(values.reduce((total, value) => total + value, 0) / values.length);
+}
+
+function formatTrendLabel(date: string): string {
+  const [, month, day] = date.split("-").map(Number);
+
+  return `${month}/${day}`;
+}
+
 export function calculateCycleSummary(
-  records: PeriodRecord[],
+  periods: CyclePeriod[],
   settings: UserCycleSettings = DEFAULT_CYCLE_SETTINGS,
   today = new Date()
 ): CycleSummary {
-  const latestRecord = sortRecords(records)[0];
+  const latestPeriod = sortPeriods(periods)[0];
 
-  if (!latestRecord) {
+  if (!latestPeriod) {
     return {
       currentDay: 0,
       phase: "unknown",
@@ -209,9 +150,9 @@ export function calculateCycleSummary(
   }
 
   const normalizedSettings = normalizeSettings(settings);
-  const elapsedDays = differenceInDays(latestRecord.startDate, today);
+  const elapsedDays = differenceInDays(latestPeriod.startDate, today);
   const currentDay = Math.max(elapsedDays + 1, 1);
-  const nextPeriodDate = addDays(latestRecord.startDate, normalizedSettings.averageCycleLength);
+  const nextPeriodDate = addDays(latestPeriod.startDate, normalizedSettings.averageCycleLength);
   const daysUntilNextPeriod = Math.max(differenceInDays(formatDate(today), parseDate(nextPeriodDate)), 0);
   const fertileWindowStart = addDays(nextPeriodDate, -16);
   const fertileWindowEnd = addDays(nextPeriodDate, -11);
@@ -229,14 +170,36 @@ export function calculateCycleSummary(
   };
 }
 
-function periodToSummaryRecord(period: CyclePeriod): PeriodRecord {
+export function calculateCycleInsights(
+  periods: CyclePeriod[],
+  dayLogs: DayStatusLog[],
+  settings: UserCycleSettings = DEFAULT_CYCLE_SETTINGS
+): CycleInsights {
+  const normalizedSettings = normalizeSettings(settings);
+  const ascendingPeriods = [...periods].sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const cycleLengths = ascendingPeriods.slice(1).map((period, index) => {
+    const previousPeriod = ascendingPeriods[index];
+
+    return differenceInDays(previousPeriod.startDate, parseDate(period.startDate));
+  });
+  const closedPeriodLengths = ascendingPeriods
+    .filter((period) => period.endDate)
+    .map((period) => differenceInDays(period.startDate, parseDate(period.endDate as string)) + 1);
+  const cycleTrend = cycleLengths.slice(-6).map((value, index) => {
+    const period = ascendingPeriods[ascendingPeriods.length - cycleLengths.slice(-6).length + index];
+
+    return {
+      id: period.startDate,
+      label: formatTrendLabel(period.startDate),
+      value
+    };
+  });
+
   return {
-    id: period.id,
-    startDate: period.startDate,
-    endDate: period.endDate,
-    flowLevel: "medium",
-    createdAt: period.createdAt,
-    updatedAt: period.updatedAt
+    averageCycleLength: average(cycleLengths) ?? normalizedSettings.averageCycleLength,
+    averagePeriodLength: average(closedPeriodLengths) ?? normalizedSettings.averagePeriodLength,
+    cycleTrend,
+    recordedDays: new Set(dayLogs.map((log) => log.date)).size
   };
 }
 
@@ -325,39 +288,15 @@ function upsertDayStatusLog(
 }
 
 export class LocalPeriodRepository implements PeriodRepository {
-  getRecords(): PeriodRecord[] {
-    try {
-      const rawRecords = localStorage.getItem(RECORDS_KEY);
-      if (!rawRecords) return [];
-
-      const parsed = JSON.parse(rawRecords) as unknown;
-      if (!Array.isArray(parsed)) return [];
-
-      return sortRecords(parsed.filter(isPeriodRecord));
-    } catch (error) {
-      logDebugError("LocalPeriodRepository.getRecords", error);
-      return [];
-    }
-  }
-
-  saveRecords(records: PeriodRecord[]): void {
-    try {
-      localStorage.setItem(RECORDS_KEY, JSON.stringify(sortRecords(records)));
-    } catch (error) {
-      logDebugError("LocalPeriodRepository.saveRecords", error, { count: records.length });
-      throw new Error("保存经期记录失败，请稍后重试。");
-    }
-  }
-
   getCyclePeriods(): CyclePeriod[] {
     try {
       const rawPeriods = localStorage.getItem(PERIODS_KEY);
-      if (rawPeriods) {
-        const parsed = JSON.parse(rawPeriods) as unknown;
-        if (Array.isArray(parsed)) return sortPeriods(parsed.filter(isCyclePeriod));
-      }
+      if (!rawPeriods) return [];
 
-      return legacyRecordsToPeriods(this.getRecords());
+      const parsed = JSON.parse(rawPeriods) as unknown;
+      if (!Array.isArray(parsed)) return [];
+
+      return sortPeriods(parsed.filter(isCyclePeriod));
     } catch (error) {
       logDebugError("LocalPeriodRepository.getCyclePeriods", error);
       return [];
@@ -376,12 +315,12 @@ export class LocalPeriodRepository implements PeriodRepository {
   getDayStatusLogs(): DayStatusLog[] {
     try {
       const rawLogs = localStorage.getItem(DAY_LOGS_KEY);
-      if (rawLogs) {
-        const parsed = JSON.parse(rawLogs) as unknown;
-        if (Array.isArray(parsed)) return sortDayLogs(parsed.filter(isDayStatusLog));
-      }
+      if (!rawLogs) return [];
 
-      return legacyRecordsToDayLogs(this.getRecords());
+      const parsed = JSON.parse(rawLogs) as unknown;
+      if (!Array.isArray(parsed)) return [];
+
+      return sortDayLogs(parsed.filter(isDayStatusLog));
     } catch (error) {
       logDebugError("LocalPeriodRepository.getDayStatusLogs", error);
       return [];
@@ -424,71 +363,26 @@ export function createPeriodService(
   today = new Date()
 ): PeriodService {
   function snapshot(
-    records = repository.getRecords(),
     settings = repository.getSettings(),
     periods = repository.getCyclePeriods(),
     dayLogs = repository.getDayStatusLogs()
   ): PeriodServiceSnapshot {
-    const summaryRecords = periods.length ? periods.map(periodToSummaryRecord) : records;
-
     return {
-      records,
       periods,
       dayLogs,
       settings,
-      summary: calculateCycleSummary(summaryRecords, settings, today)
+      summary: calculateCycleSummary(periods, settings, today),
+      insights: calculateCycleInsights(periods, dayLogs, settings)
     };
   }
 
   return {
-    addRecord(input: PeriodRecordInput) {
-      try {
-        const now = new Date().toISOString();
-        const record: PeriodRecord = {
-          id: createId(),
-          createdAt: now,
-          updatedAt: now,
-          ...input
-        };
-        const records = sortRecords([record, ...repository.getRecords()]);
-
-        repository.saveRecords(records);
-        return snapshot(records);
-      } catch (error) {
-        logDebugError("createPeriodService.addRecord", error, input);
-        throw error instanceof Error ? error : new Error("新增经期记录失败。");
-      }
-    },
-    updateRecord(id: string, input: PeriodRecordInput) {
-      try {
-        const records = repository.getRecords().map((record) =>
-          record.id === id ? { ...record, ...input, updatedAt: new Date().toISOString() } : record
-        );
-
-        repository.saveRecords(records);
-        return snapshot(records);
-      } catch (error) {
-        logDebugError("createPeriodService.updateRecord", error, { id, input });
-        throw error instanceof Error ? error : new Error("更新经期记录失败。");
-      }
-    },
-    deleteRecord(id: string) {
-      try {
-        const records = repository.getRecords().filter((record) => record.id !== id);
-
-        repository.saveRecords(records);
-        return snapshot(records);
-      } catch (error) {
-        logDebugError("createPeriodService.deleteRecord", error, { id });
-        throw error instanceof Error ? error : new Error("删除经期记录失败。");
-      }
-    },
     saveDayStatusLog(input: DayStatusLogInput) {
       try {
         const logs = upsertDayStatusLog(repository.getDayStatusLogs(), input, new Date().toISOString());
 
         repository.saveDayStatusLogs(logs);
-        return snapshot(undefined, undefined, undefined, logs);
+        return snapshot(undefined, undefined, logs);
       } catch (error) {
         logDebugError("createPeriodService.saveDayStatusLog", error, input);
         throw error instanceof Error ? error : new Error("保存每日状态失败。");
@@ -573,7 +467,7 @@ export function createPeriodService(
 
         repository.saveCyclePeriods(periods);
         repository.saveDayStatusLogs(logs);
-        return snapshot(undefined, undefined, periods, logs);
+        return snapshot(undefined, periods, logs);
       } catch (error) {
         logDebugError("createPeriodService.answerPeriodPrompt", error, { date, question, answer, time });
         throw error instanceof Error ? error : new Error("保存月经开始结束状态失败。");
@@ -584,9 +478,6 @@ export function createPeriodService(
     },
     getPeriodRanges() {
       return repository.getCyclePeriods();
-    },
-    getRecords() {
-      return repository.getRecords();
     },
     getDayStatusLogs() {
       return repository.getDayStatusLogs();
@@ -600,7 +491,7 @@ export function createPeriodService(
     saveSettings(settings: UserCycleSettings) {
       const normalizedSettings = normalizeSettings(settings);
       repository.saveSettings(normalizedSettings);
-      return snapshot(repository.getRecords(), normalizedSettings);
+      return snapshot(normalizedSettings);
     },
     getCycleSummary() {
       return snapshot().summary;

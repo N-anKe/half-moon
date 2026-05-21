@@ -14,27 +14,6 @@ export interface CyclePeriod {
   updatedAt: string;
 }
 
-export interface PeriodRecord {
-  id: string;
-  startDate: string;
-  endDate?: string;
-  flowLevel?: FlowLevel;
-  symptoms?: string[];
-  mood?: string;
-  notes?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface PeriodRecordInput {
-  startDate: string;
-  endDate?: string;
-  flowLevel?: FlowLevel;
-  symptoms?: string[];
-  mood?: string;
-  notes?: string;
-}
-
 export interface DayStatusLog {
   id: string;
   date: string;
@@ -100,9 +79,20 @@ export interface CycleSummary {
   daysUntilNextPeriod: number | null;
 }
 
+export interface CycleTrendPoint {
+  id: string;
+  label: string;
+  value: number;
+}
+
+export interface CycleInsights {
+  averageCycleLength: number;
+  averagePeriodLength: number;
+  cycleTrend: CycleTrendPoint[];
+  recordedDays: number;
+}
+
 export interface PeriodRepository {
-  getRecords(): PeriodRecord[];
-  saveRecords(records: PeriodRecord[]): void;
   getCyclePeriods(): CyclePeriod[];
   saveCyclePeriods(periods: CyclePeriod[]): void;
   getDayStatusLogs(): DayStatusLog[];
@@ -112,11 +102,11 @@ export interface PeriodRepository {
 }
 
 export interface PeriodServiceSnapshot {
-  records: PeriodRecord[];
   periods: CyclePeriod[];
   dayLogs: DayStatusLog[];
   settings: UserCycleSettings;
   summary: CycleSummary;
+  insights: CycleInsights;
 }
 
 export interface PeriodPrompt {
@@ -127,9 +117,6 @@ export interface PeriodPrompt {
 }
 
 export interface PeriodService {
-  addRecord(input: PeriodRecordInput): PeriodServiceSnapshot;
-  updateRecord(id: string, input: PeriodRecordInput): PeriodServiceSnapshot;
-  deleteRecord(id: string): PeriodServiceSnapshot;
   saveDayStatusLog(input: DayStatusLogInput): PeriodServiceSnapshot;
   answerPeriodPrompt(
     date: string,
@@ -139,7 +126,6 @@ export interface PeriodService {
   ): PeriodServiceSnapshot;
   getPeriodPromptForDate(date: string): PeriodPrompt;
   getPeriodRanges(): CyclePeriod[];
-  getRecords(): PeriodRecord[];
   getDayStatusLogs(): DayStatusLog[];
   getCyclePeriods(): CyclePeriod[];
   getSettings(): UserCycleSettings;

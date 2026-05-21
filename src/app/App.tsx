@@ -48,8 +48,7 @@ export default function App() {
         ) : null}
         {activeTab === "insights" ? (
           <InsightsTab
-            records={snapshot.records}
-            settings={snapshot.settings}
+            insights={snapshot.insights}
             summary={snapshot.summary}
           />
         ) : null}
