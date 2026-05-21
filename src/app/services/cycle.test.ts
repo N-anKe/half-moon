@@ -90,7 +90,7 @@ describe("calculateCycleInsights", () => {
     const insights = calculateCycleInsights(
       [makePeriod({ startDate: "2026-05-08", endDate: undefined })],
       [],
-      { averageCycleLength: 30, averagePeriodLength: 6 }
+      { ...DEFAULT_CYCLE_SETTINGS, averageCycleLength: 30, averagePeriodLength: 6 }
     );
 
     expect(insights.averageCycleLength).toBe(30);
@@ -116,6 +116,26 @@ describe("LocalPeriodRepository", () => {
       expect.stringContaining("[DEBUG]"),
       expect.any(Error)
     );
+  });
+
+  test("fills profile defaults when stored settings are missing new fields", () => {
+    localStorage.setItem(
+      "half-moon.cycle-settings",
+      JSON.stringify({
+        averageCycleLength: 30,
+        averagePeriodLength: 6
+      })
+    );
+
+    const repository = new LocalPeriodRepository();
+
+    expect(repository.getSettings()).toEqual({
+      averageCycleLength: 30,
+      averagePeriodLength: 6,
+      age: 26,
+      heightCm: 165,
+      weightKg: 52
+    });
   });
 });
 
@@ -160,6 +180,74 @@ describe("createPeriodService", () => {
       mood: "平静",
       details: {
         temperature: 36.8
+      }
+    });
+  });
+
+  test("saves editable profile fields in cycle settings", () => {
+    const service = createPeriodService(new LocalPeriodRepository(), fixedToday);
+
+    const result = service.saveSettings({
+      averageCycleLength: 31,
+      averagePeriodLength: 7,
+      age: 28,
+      heightCm: 168,
+      weightKg: 54.5
+    });
+
+    expect(result.settings).toEqual({
+      averageCycleLength: 31,
+      averagePeriodLength: 7,
+      age: 28,
+      heightCm: 168,
+      weightKg: 54.5
+    });
+    expect(JSON.parse(localStorage.getItem("half-moon.cycle-settings") ?? "{}")).toMatchObject({
+      age: 28,
+      heightCm: 168,
+      weightKg: 54.5
+    });
+  });
+
+  test("syncs daily weight details into profile settings", () => {
+    const service = createPeriodService(new LocalPeriodRepository(), fixedToday);
+
+    const result = service.saveDayStatusLog({
+      date: "2026-05-19",
+      periodQuestion: "start",
+      periodAnswer: "no",
+      time: "09:20",
+      details: {
+        weight: 55.2
+      }
+    });
+
+    expect(result.settings.weightKg).toBe(55.2);
+    expect(JSON.parse(localStorage.getItem("half-moon.cycle-settings") ?? "{}")).toMatchObject({
+      weightKg: 55.2
+    });
+  });
+
+  test("writes profile weight edits into today's day status details", () => {
+    const service = createPeriodService(new LocalPeriodRepository(), fixedToday);
+
+    const result = service.saveSettings(
+      {
+        averageCycleLength: 28,
+        averagePeriodLength: 5,
+        age: 26,
+        heightCm: 165,
+        weightKg: 53.8
+      },
+      { syncWeightToToday: true }
+    );
+
+    expect(result.dayLogs[0]).toMatchObject({
+      date: "2026-05-19",
+      periodQuestion: "start",
+      periodAnswer: "no",
+      details: {
+        weight: 53.8
       }
     });
   });

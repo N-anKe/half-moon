@@ -11,6 +11,7 @@ import type {
   PeriodRepository,
   PeriodService,
   PeriodServiceSnapshot,
+  SaveSettingsOptions,
   UserCycleSettings
 } from "../models/cycle";
 import { logDebugError } from "../utils/debug";
@@ -22,7 +23,10 @@ const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 export const DEFAULT_CYCLE_SETTINGS: UserCycleSettings = {
   averageCycleLength: 28,
-  averagePeriodLength: 5
+  averagePeriodLength: 5,
+  age: 26,
+  heightCm: 165,
+  weightKg: 52
 };
 
 function parseDate(value: string): Date {
@@ -86,7 +90,7 @@ function isDayStatusLog(value: unknown): value is DayStatusLog {
 }
 
 function normalizeSettings(settings: Partial<UserCycleSettings> | null): UserCycleSettings {
-  return {
+  const normalized: UserCycleSettings = {
     averageCycleLength:
       typeof settings?.averageCycleLength === "number" && settings.averageCycleLength > 0
         ? settings.averageCycleLength
@@ -95,9 +99,25 @@ function normalizeSettings(settings: Partial<UserCycleSettings> | null): UserCyc
       typeof settings?.averagePeriodLength === "number" && settings.averagePeriodLength > 0
         ? settings.averagePeriodLength
         : DEFAULT_CYCLE_SETTINGS.averagePeriodLength,
-    lastPeriodStart:
-      typeof settings?.lastPeriodStart === "string" ? settings.lastPeriodStart : undefined
+    age:
+      typeof settings?.age === "number" && settings.age > 0
+        ? settings.age
+        : DEFAULT_CYCLE_SETTINGS.age,
+    heightCm:
+      typeof settings?.heightCm === "number" && settings.heightCm > 0
+        ? settings.heightCm
+        : DEFAULT_CYCLE_SETTINGS.heightCm,
+    weightKg:
+      typeof settings?.weightKg === "number" && settings.weightKg > 0
+        ? settings.weightKg
+        : DEFAULT_CYCLE_SETTINGS.weightKg
   };
+
+  if (typeof settings?.lastPeriodStart === "string") {
+    normalized.lastPeriodStart = settings.lastPeriodStart;
+  }
+
+  return normalized;
 }
 
 function createId(): string {
@@ -362,6 +382,22 @@ export function createPeriodService(
   repository: PeriodRepository = new LocalPeriodRepository(),
   today = new Date()
 ): PeriodService {
+  function upsertTodayWeightLog(logs: DayStatusLog[], weightKg: number): DayStatusLog[] {
+    return upsertDayStatusLog(
+      logs,
+      {
+        date: formatDate(today),
+        periodQuestion: "start",
+        periodAnswer: "no",
+        time: "09:00",
+        details: {
+          weight: weightKg
+        }
+      },
+      new Date().toISOString()
+    );
+  }
+
   function snapshot(
     settings = repository.getSettings(),
     periods = repository.getCyclePeriods(),
@@ -380,9 +416,15 @@ export function createPeriodService(
     saveDayStatusLog(input: DayStatusLogInput) {
       try {
         const logs = upsertDayStatusLog(repository.getDayStatusLogs(), input, new Date().toISOString());
+        let settings = repository.getSettings();
 
         repository.saveDayStatusLogs(logs);
-        return snapshot(undefined, undefined, logs);
+        if (typeof input.details?.weight === "number" && input.details.weight > 0) {
+          settings = normalizeSettings({ ...settings, weightKg: input.details.weight });
+          repository.saveSettings(settings);
+        }
+
+        return snapshot(settings, undefined, logs);
       } catch (error) {
         logDebugError("createPeriodService.saveDayStatusLog", error, input);
         throw error instanceof Error ? error : new Error("保存每日状态失败。");
@@ -488,10 +530,15 @@ export function createPeriodService(
     getSettings() {
       return repository.getSettings();
     },
-    saveSettings(settings: UserCycleSettings) {
+    saveSettings(settings: UserCycleSettings, options: SaveSettingsOptions = {}) {
       const normalizedSettings = normalizeSettings(settings);
       repository.saveSettings(normalizedSettings);
-      return snapshot(normalizedSettings);
+      if (!options.syncWeightToToday) return snapshot(normalizedSettings);
+
+      const logs = upsertTodayWeightLog(repository.getDayStatusLogs(), normalizedSettings.weightKg);
+      repository.saveDayStatusLogs(logs);
+
+      return snapshot(normalizedSettings, undefined, logs);
     },
     getCycleSummary() {
       return snapshot().summary;

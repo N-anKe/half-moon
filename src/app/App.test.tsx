@@ -42,6 +42,10 @@ describe("Half Moon app", () => {
     );
   }
 
+  function seedSettings(settings: Record<string, unknown>) {
+    localStorage.setItem("half-moon.cycle-settings", JSON.stringify(settings));
+  }
+
   test("switches between bottom navigation tabs", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -91,6 +95,72 @@ describe("Half Moon app", () => {
     expect(localStorage.getItem("half-moon.day-status-logs")).toBeNull();
     expect(screen.getByText("删除成功")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "确认清除缓存" })).not.toBeInTheDocument();
+  });
+
+  test("renders profile data from saved settings", async () => {
+    const user = userEvent.setup();
+    seedSettings({
+      averageCycleLength: 30,
+      averagePeriodLength: 6,
+      age: 29,
+      heightCm: 170,
+      weightKg: 56.5
+    });
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "我的" }));
+
+    expect(screen.getByText("29 岁")).toBeInTheDocument();
+    expect(screen.getByText("170 cm")).toBeInTheDocument();
+    expect(screen.getByText("56.5 kg")).toBeInTheDocument();
+    expect(screen.getByText("30 天")).toBeInTheDocument();
+    expect(screen.getByText("6 天")).toBeInTheDocument();
+  });
+
+  test("edits profile weight and persists it to settings and today's day log", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "我的" }));
+    await user.click(screen.getByRole("button", { name: /体重/ }));
+
+    expect(screen.getByRole("dialog", { name: "编辑体重" })).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("体重"));
+    await user.type(screen.getByLabelText("体重"), "54.6");
+    await user.click(screen.getByRole("button", { name: "保存档案" }));
+
+    expect(screen.getByText("54.6 kg")).toBeInTheDocument();
+    expect(localStorage.getItem("half-moon.cycle-settings")).toContain("\"weightKg\":54.6");
+    expect(localStorage.getItem("half-moon.day-status-logs")).toContain("\"weight\":54.6");
+  });
+
+  test("syncs a home weight detail into the profile tab", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "添加体重" }));
+    await user.clear(screen.getByLabelText("体重数值"));
+    await user.type(screen.getByLabelText("体重数值"), "56.1");
+    await user.click(screen.getByRole("button", { name: "保存记录详情" }));
+    await user.click(screen.getByRole("button", { name: "我的" }));
+
+    expect(screen.getByText("56.1 kg")).toBeInTheDocument();
+  });
+
+  test("editing average cycle length updates the next period prediction", async () => {
+    const user = userEvent.setup();
+    seedPeriods([{ startDate: "2026-05-10", endDate: "2026-05-14" }]);
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "我的" }));
+    await user.click(screen.getByRole("button", { name: /平均周期长度/ }));
+    await user.clear(screen.getByLabelText("平均周期长度"));
+    await user.type(screen.getByLabelText("平均周期长度"), "31");
+    await user.click(screen.getByRole("button", { name: "保存档案" }));
+    await user.click(screen.getByRole("button", { name: "分析" }));
+
+    expect(screen.getByText("2026-06-10")).toBeInTheDocument();
   });
 
   test("automatically saves a day status log when a selected date status changes", async () => {

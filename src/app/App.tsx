@@ -7,6 +7,7 @@ import type {
   DayStatusLogInput,
   PeriodAnswer,
   PeriodQuestion,
+  SaveSettingsOptions,
   PeriodServiceSnapshot
 } from "./models/cycle";
 import { createPeriodService, LocalPeriodRepository } from "./services/cycle";
@@ -29,6 +30,13 @@ export default function App() {
     time: string
   ) {
     setSnapshot(service.answerPeriodPrompt(date, question, answer, time));
+  }
+
+  function handleSaveSettings(
+    settings: PeriodServiceSnapshot["settings"],
+    options?: SaveSettingsOptions
+  ) {
+    setSnapshot(service.saveSettings(settings, options));
   }
 
   return (
@@ -55,6 +63,7 @@ export default function App() {
         {activeTab === "profile" ? (
           <ProfileTab
             settings={snapshot.settings}
+            onSaveSettings={handleSaveSettings}
             onClearCache={() => {
               localStorage.clear();
               setSnapshot(service.getSnapshot());

@@ -63,7 +63,14 @@ export interface DayStatusDetails {
 export interface UserCycleSettings {
   averageCycleLength: number;
   averagePeriodLength: number;
+  age: number;
+  heightCm: number;
+  weightKg: number;
   lastPeriodStart?: string;
+}
+
+export interface SaveSettingsOptions {
+  syncWeightToToday?: boolean;
 }
 
 export interface DateRange {
@@ -129,7 +136,7 @@ export interface PeriodService {
   getDayStatusLogs(): DayStatusLog[];
   getCyclePeriods(): CyclePeriod[];
   getSettings(): UserCycleSettings;
-  saveSettings(settings: UserCycleSettings): PeriodServiceSnapshot;
+  saveSettings(settings: UserCycleSettings, options?: SaveSettingsOptions): PeriodServiceSnapshot;
   getCycleSummary(): CycleSummary;
   getSnapshot(): PeriodServiceSnapshot;
 }

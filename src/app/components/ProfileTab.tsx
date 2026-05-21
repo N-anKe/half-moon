@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import {
   CheckCircle2,
   ChevronRight,
@@ -10,17 +10,67 @@ import {
   Weight,
   X
 } from "lucide-react";
-import type { UserCycleSettings } from "../models/cycle";
+import type { SaveSettingsOptions, UserCycleSettings } from "../models/cycle";
 import { logDebugError } from "../utils/debug";
 
 interface ProfileTabProps {
   settings: UserCycleSettings;
+  onSaveSettings: (settings: UserCycleSettings, options?: SaveSettingsOptions) => void;
   onClearCache: () => void;
 }
 
-function ProfileRow({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+type ProfileFieldKey = "age" | "heightCm" | "weightKg" | "averageCycleLength" | "averagePeriodLength";
+
+interface ProfileFieldConfig {
+  key: ProfileFieldKey;
+  label: string;
+  unit: string;
+  step: string;
+  icon: ReactNode;
+}
+
+const PROFILE_FIELDS: ProfileFieldConfig[] = [
+  { key: "age", label: "年龄", unit: "岁", step: "1", icon: <UserRound className="h-5 w-5" /> },
+  { key: "heightCm", label: "身高", unit: "cm", step: "1", icon: <Ruler className="h-5 w-5" /> },
+  { key: "weightKg", label: "体重", unit: "kg", step: "0.1", icon: <Weight className="h-5 w-5" /> },
+  {
+    key: "averageCycleLength",
+    label: "平均周期长度",
+    unit: "天",
+    step: "1",
+    icon: <Database className="h-5 w-5" />
+  },
+  {
+    key: "averagePeriodLength",
+    label: "经期天数",
+    unit: "天",
+    step: "1",
+    icon: <ShieldCheck className="h-5 w-5" />
+  }
+];
+
+function formatProfileValue(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function ProfileRow({
+  icon,
+  label,
+  value,
+  onClick
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  onClick: () => void;
+}) {
   return (
-    <button className="flex w-full items-center justify-between rounded-[24px] bg-white px-4 py-4 text-left shadow-[0_8px_24px_rgba(0,0,0,0.03)]">
+    <button
+      type="button"
+      aria-label={`编辑${label}`}
+      onClick={onClick}
+      className="flex w-full items-center justify-between rounded-[24px] bg-white px-4 py-4 text-left shadow-[0_8px_24px_rgba(0,0,0,0.03)]"
+    >
       <div className="flex items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F8EEF0] text-[#DFA4A9]">
           {icon}
@@ -35,9 +85,92 @@ function ProfileRow({ icon, label, value }: { icon: ReactNode; label: string; va
   );
 }
 
-export function ProfileTab({ settings, onClearCache }: ProfileTabProps) {
+function ProfileEditSheet({
+  field,
+  value,
+  onClose,
+  onSave
+}: {
+  field: ProfileFieldConfig;
+  value: number;
+  onClose: () => void;
+  onSave: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(formatProfileValue(value));
+  const dialogTitle = `编辑${field.label}`;
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextValue = Number(draft);
+    if (!Number.isFinite(nextValue) || nextValue <= 0) return;
+
+    onSave(nextValue);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/20 px-6 pb-[calc(env(safe-area-inset-bottom)+96px)] backdrop-blur-sm sm:items-center sm:pb-0">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label={dialogTitle}
+        className="w-full max-w-[382px] rounded-[28px] bg-white p-5 shadow-[0_18px_45px_rgba(0,0,0,0.16)]"
+      >
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-[18px] font-semibold text-[#1D1D1F]">{dialogTitle}</h2>
+            <p className="mt-2 text-[13px] leading-6 text-gray-500">
+              保存后会同步到本地身体数据档案。
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="关闭档案编辑"
+            onClick={onClose}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-400"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <form className="space-y-4" onSubmit={handleSubmit}>
+          <label className="block space-y-2 text-[13px] font-semibold text-gray-500">
+            {field.label}
+            <input
+              aria-label={field.label}
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step={field.step}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              className="h-14 w-full rounded-[22px] border border-gray-100 bg-gray-50 px-4 text-[22px] font-semibold text-[#1D1D1F] outline-none focus:ring-2 focus:ring-[#E94D8A]/20"
+              required
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="h-11 rounded-full bg-gray-100 text-[14px] font-semibold text-gray-500"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              className="h-11 rounded-full bg-[#1D1D1F] text-[14px] font-semibold text-white shadow-[0_10px_22px_rgba(29,29,31,0.18)]"
+            >
+              保存档案
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+export function ProfileTab({ settings, onSaveSettings, onClearCache }: ProfileTabProps) {
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [feedback, setFeedback] = useState<"success" | "error" | null>(null);
+  const [editingField, setEditingField] = useState<ProfileFieldConfig | null>(null);
 
   function handleRequestClear() {
     setFeedback(null);
@@ -52,6 +185,23 @@ export function ProfileTab({ settings, onClearCache }: ProfileTabProps) {
     } catch (error) {
       logDebugError("ProfileTab.handleConfirmClear", error);
       setConfirmingClear(false);
+      setFeedback("error");
+    }
+  }
+
+  function handleSaveField(field: ProfileFieldConfig, value: number) {
+    try {
+      const nextSettings = {
+        ...settings,
+        [field.key]: value
+      };
+      const options = field.key === "weightKg" ? { syncWeightToToday: true } : undefined;
+
+      onSaveSettings(nextSettings, options);
+      setEditingField(null);
+      setFeedback(null);
+    } catch (error) {
+      logDebugError("ProfileTab.handleSaveField", error, { field: field.key, value });
       setFeedback("error");
     }
   }
@@ -73,11 +223,15 @@ export function ProfileTab({ settings, onClearCache }: ProfileTabProps) {
       <section className="mb-6">
         <h2 className="mb-3 px-1 text-[17px] font-semibold text-[#1D1D1F]">身体数据档案</h2>
         <div className="space-y-3">
-          <ProfileRow icon={<UserRound className="h-5 w-5" />} label="年龄" value="26 岁" />
-          <ProfileRow icon={<Ruler className="h-5 w-5" />} label="身高" value="165 cm" />
-          <ProfileRow icon={<Weight className="h-5 w-5" />} label="体重" value="52 kg" />
-          <ProfileRow icon={<Database className="h-5 w-5" />} label="平均周期长度" value={`${settings.averageCycleLength} 天`} />
-          <ProfileRow icon={<ShieldCheck className="h-5 w-5" />} label="经期天数" value={`${settings.averagePeriodLength} 天`} />
+          {PROFILE_FIELDS.map((field) => (
+            <ProfileRow
+              key={field.key}
+              icon={field.icon}
+              label={field.label}
+              value={`${formatProfileValue(settings[field.key])} ${field.unit}`}
+              onClick={() => setEditingField(field)}
+            />
+          ))}
         </div>
       </section>
 
@@ -159,6 +313,15 @@ export function ProfileTab({ settings, onClearCache }: ProfileTabProps) {
             </div>
           </section>
         </div>
+      ) : null}
+
+      {editingField ? (
+        <ProfileEditSheet
+          field={editingField}
+          value={settings[editingField.key]}
+          onClose={() => setEditingField(null)}
+          onSave={(value) => handleSaveField(editingField, value)}
+        />
       ) : null}
     </div>
   );
